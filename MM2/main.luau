@@ -4773,7 +4773,7 @@ plrSec:Toggle({
 	end,
 })
 
-local espSec = win:Section("Esp", "eye")
+local espSec = win:Section("Visuals", "eye")
 espSec:Title({ Text = "ESP", Icon = "eye" })
 
 espSec:Toggle({
