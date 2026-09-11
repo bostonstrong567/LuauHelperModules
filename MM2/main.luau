@@ -672,19 +672,32 @@ local function excludeMe()
 	return danger.rayIgnoring({ myChar() })
 end
 
-local function aimParams()
-	local rp = RaycastParams.new()
-	rp.FilterType = Enum.RaycastFilterType.Exclude
+function danger.weaponIgnore()
 	local map = getMap()
-	local coins = map and map:FindFirstChild("CoinContainer")
-	rp.FilterDescendantsInstances = { myChar(), coins }
-	return rp
+	local list = { myChar(), map and map:FindFirstChild("CoinContainer") }
+	for _, v in CollectionService:GetTagged("WeaponPassthrough") do
+		table.insert(list, v)
+	end
+	return list
+end
+
+function danger.weaponRay(from, to)
+	local ignore = danger.weaponIgnore()
+	local rp = danger.rayIgnoring(ignore)
+	local dir = to - from
+	while true do
+		local hit = Workspace:Raycast(from, dir, rp)
+		if not hit then return nil end
+		local part = hit.Instance
+		if not part or part.Transparency ~= 1 then return hit end
+		table.insert(ignore, part)
+		rp = danger.rayIgnoring(ignore)
+	end
 end
 
 local function shotIsClear(fromPos, targetPart)
 	local body = targetPart.Parent
 	if not body then return false end
-	local rp = aimParams()
 	local centre = targetPart.Position
 	local side = centre - fromPos
 	side = Vector3.new(-side.Z, 0, side.X)
@@ -693,7 +706,7 @@ local function shotIsClear(fromPos, targetPart)
 	local head = body:FindFirstChild("Head")
 	local aims = { centre, head and head.Position or centre + Vector3.new(0, 2, 0), centre + side, centre - side }
 	for _, aim in aims do
-		local hit = Workspace:Raycast(fromPos, aim - fromPos, rp)
+		local hit = danger.weaponRay(fromPos, aim)
 		if not hit or not hit.Instance:IsDescendantOf(body) then return false end
 	end
 	return true
@@ -821,24 +834,17 @@ local function clearAim(origin, entry)
 	local root = entry.root
 	local head = char and char:FindFirstChild("Head")
 	if not char or not root then return nil end
-	local seen, now = hold.seen[root], os.clock()
-	local v = Vector3.zero
-	if seen and now - seen.at > 0.04 and now - seen.at < 0.5 then
-		v = (root.Position - seen.pos) / (now - seen.at)
-		v = Vector3.new(v.X, 0, v.Z)
-		if v.Magnitude > 20 then v = v.Unit * (20 + (math.min(v.Magnitude, 60) - 20) * 0.25) end
-	end
+	local now = os.clock()
+	local seen = hold.seen[root]
 	if not seen or now - seen.at > 0.04 then hold.seen[root] = { pos = root.Position, at = now } end
-	local lead = v * (player:GetNetworkPing() + 0.1)
 	local side = root.Position - origin
 	side = Vector3.new(-side.Z, 0, side.X)
 	side = side.Magnitude > 0.01 and side.Unit * 1.1 or Vector3.zero
-	local points = { root.Position + lead, root.Position + lead + Vector3.new(0, 1.3, 0), root.Position + lead + side, root.Position + lead - side }
-	if head then table.insert(points, 2, head.Position + lead) end
-	local rp = aimParams()
+	local points = { root.Position, root.Position + Vector3.new(0, 1.3, 0), root.Position + side, root.Position - side }
+	if head then table.insert(points, 2, head.Position) end
 	local blocker
 	local function lands(from, ray)
-		local hit = Workspace:Raycast(from, ray * 1.5, rp)
+		local hit = danger.weaponRay(from, from + ray)
 		if not hit then return false end
 		if hit.Instance:IsDescendantOf(char) then return true, hit.Position end
 		blocker = blocker or hit.Instance
