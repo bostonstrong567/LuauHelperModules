@@ -91,6 +91,7 @@ local ROLE_COLOURS = {
 
 local COIN_COLOUR = Color3.fromRGB(255, 200, 40)
 local KNIFE_REACH = 12
+local THROW_REACH = 70
 local AIM_FOV_MAX = 800
 local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
@@ -478,6 +479,15 @@ function danger.onMap(who)
 	if danger.lobbyHas(root.Position) then return false end
 	local box = boundsOf(map)
 	return insideBox(root.Position, box.cf, box.size, 150)
+end
+
+function danger.knifeNear()
+	if findTool("Knife") then return false end
+	local who = findByRole("Murderer")
+	if not who or who == player or isDead(who) then return false end
+	local part, me = hitPartOf(who), myRoot()
+	if not part or not me then return false end
+	return (part.Position - me.Position).Magnitude < THROW_REACH
 end
 
 function danger.cheaters()
@@ -938,7 +948,7 @@ local function shootTarget(entry)
 	return true
 end
 
-local sniper = { busy = false, blockedSince = nil, close = 22, hold = 34, far = 80, reach = 45, label = nil, labelAt = 0, noPath = {} }
+local sniper = { busy = false, blockedSince = nil, close = 30, hold = 48, far = 80, reach = 45, label = nil, labelAt = 0, noPath = {} }
 
 local function sniperTick(now)
 	local target
@@ -1488,13 +1498,14 @@ end
 
 local lastHop = 0
 
-local function jumpNow()
+local function jumpNow(force)
 	local now = os.clock()
 	if now - lastHop < 0.6 then return end
 	local hum = myHumanoid()
 	if not hum then return end
 	local st = hum:GetState()
 	if st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Jumping then return end
+	if not force and danger.knifeNear() then return end
 	lastHop = now
 	hum:ChangeState(Enum.HumanoidStateType.Jumping)
 end
@@ -1651,7 +1662,7 @@ local function travel(run, points, hum)
 		if wp.Action == Enum.PathWaypointAction.Jump then
 			local r = myRoot()
 			if r then
-				jumpNow()
+				jumpNow(true)
 			end
 		end
 
