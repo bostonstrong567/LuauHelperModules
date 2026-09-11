@@ -6878,7 +6878,8 @@ ui.colourSec:ColorPicker({
 -- and the esp.heat teardown line in OnDestroy removes it completely.
 esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, trapsAt = 0,
 	pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }),
-	shade = setmetatable({}, { __mode = "k" }), traps = setmetatable({}, { __mode = "k" }) }
+	shade = setmetatable({}, { __mode = "k" }), traps = setmetatable({}, { __mode = "k" }),
+	lit = setmetatable({}, { __mode = "k" }), cutOf = setmetatable({}, { __mode = "k" }), was = nil }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -6947,8 +6948,12 @@ function esp.heatDraw()
 		table.clear(esp.heat.pieces)
 		table.clear(esp.heat.risks)
 	end
-	if now - esp.heat.at < 0.35 then return end
+	-- redraw every frame; the work is skipped per tile when nothing about it changed
+	local moved = not esp.heat.was or (root.Position - esp.heat.was).Magnitude > 1
+	local slice = now - esp.heat.at > 0.12
+	if not moved and not slice then return end
 	esp.heat.at = now
+	esp.heat.was = root.Position
 	if not esp.heat.folder or not esp.heat.folder.Parent then
 		local folder = Instance.new("Folder")
 		folder.Name = "MM2Heat"
@@ -7036,13 +7041,20 @@ function esp.heatDraw()
 		esp.heat.shade[node] = heat
 
 		local cut = mine ~= nil and esp.heatPiece(node) ~= mine
+		local want, fade
 		if cut then
 			-- cannot be reached from where you stand: drawn dark and flat, not coloured
-			tile.Color = Color3.fromRGB(16, 16, 18)
-			tile.Transparency = 0.55
+			want, fade = Color3.fromRGB(16, 16, 18), 0.55
 		else
-			tile.Color = esp.heatColour(heat)
-			tile.Transparency = 0.62 - heat * 0.22
+			want, fade = esp.heatColour(heat), 0.62 - heat * 0.22
+		end
+		-- only write when it actually differs: property writes are the whole cost here
+		local shown = esp.heat.lit[tile]
+		if not shown or math.abs(shown - heat) > 0.02 or cut ~= esp.heat.cutOf[tile] then
+			tile.Color = want
+			tile.Transparency = fade
+			esp.heat.lit[tile] = heat
+			esp.heat.cutOf[tile] = cut
 		end
 
 		-- on the planned route: brighten it, strongest at the leg we are walking now
@@ -7057,6 +7069,7 @@ function esp.heatDraw()
 			-- the way we are walking: the only bright thing on screen
 			tile.Color = Color3.fromRGB(80, 230, 160)
 			tile.Transparency = 0.4 - strength * 0.3
+			esp.heat.lit[tile] = nil
 			-- stay flat: widen and sit a little prouder, never grow tall enough to read as a post
 			tile.Size = Vector3.new(pitch * 1.02, 0.16, pitch * 1.02)
 			tile.CFrame = CFrame.new(floor + Vector3.new(0, 0.16 + strength * 0.06, 0))
