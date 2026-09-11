@@ -6995,9 +6995,10 @@ function esp.heatDraw()
 		local tile = esp.heatTile(used)
 		local floor = node.Floor or node.Position
 		local head = node.Clear or pitch
-		local rest = floor + Vector3.new(0, 0.12, 0)
+		local rest = CFrame.new(floor + Vector3.new(0, 0.12, 0))
 		if tile.Size ~= flatSize then tile.Size = flatSize end
-		if tile.Position ~= rest then tile.Position = rest end
+		-- tiles are reused between passes: a part that was a rotated link bar must be levelled
+		if tile.CFrame ~= rest then tile.CFrame = rest end
 
 		-- cost to stand here: how far, how much climbing, how exposed, how tight
 		local away = danger.flat(node.Position, here).Magnitude / math.max(range, 1)
@@ -7029,10 +7030,10 @@ function esp.heatDraw()
 		end
 		if onPlan then
 			local strength = 1 - (onPlan - 1) / 14
-			tile.Color = tile.Color:Lerp(Color3.fromRGB(255, 255, 255), 0.35 + strength * 0.5)
-			tile.Transparency = 0.32 - strength * 0.2
-			tile.Size = Vector3.new(pitch, 0.15 + strength * 0.45, pitch)
-			tile.Position = floor + Vector3.new(0, 0.12 + strength * 0.22, 0)
+			tile.Color = Color3.fromRGB(255, 255, 255)
+			tile.Transparency = 0.3 - strength * 0.22
+			tile.Size = Vector3.new(pitch, 0.2 + strength * 0.5, pitch)
+			tile.CFrame = CFrame.new(floor + Vector3.new(0, 0.14 + strength * 0.25, 0))
 		end
 	end
 
