@@ -5040,21 +5040,13 @@ function esp.heatClear()
 end
 
 function esp.heatColour(fraction)
-	-- safe deep blue, through green and amber, to a pale hot core over the murderer
-	local stops = {
-		Color3.fromRGB(20, 60, 200),
-		Color3.fromRGB(30, 170, 200),
-		Color3.fromRGB(60, 215, 110),
-		Color3.fromRGB(230, 225, 70),
-		Color3.fromRGB(245, 150, 45),
-		Color3.fromRGB(240, 60, 50),
-		Color3.fromRGB(255, 190, 190),
-	}
-	local f = math.clamp(fraction, 0, 1) * (#stops - 1)
-	local low = math.floor(f)
-	local pick = stops[low + 1]
-	local next_ = stops[math.min(low + 2, #stops)]
-	return pick:Lerp(next_, f - low)
+	-- one hue only: quiet slate where it is safe, red where it is not
+	local f = math.clamp(fraction, 0, 1)
+	local calm = Color3.fromRGB(38, 52, 74)
+	local warm = Color3.fromRGB(150, 45, 45)
+	local hot = Color3.fromRGB(235, 40, 40)
+	if f < 0.65 then return calm:Lerp(warm, f / 0.65) end
+	return warm:Lerp(hot, (f - 0.65) / 0.35)
 end
 
 function esp.heatPiece(node)
@@ -5189,11 +5181,12 @@ function esp.heatDraw()
 
 		local cut = mine ~= nil and esp.heatPiece(node) ~= mine
 		if cut then
-			tile.Color = Color3.fromRGB(120, 40, 140)
-			tile.Transparency = 0.25
+			-- cannot be reached from where you stand: drawn dark and flat, not coloured
+			tile.Color = Color3.fromRGB(16, 16, 18)
+			tile.Transparency = 0.55
 		else
 			tile.Color = esp.heatColour(heat)
-			tile.Transparency = 0.45
+			tile.Transparency = 0.62 - heat * 0.22
 		end
 
 		-- on the planned route: brighten it, strongest at the leg we are walking now
@@ -5205,9 +5198,9 @@ function esp.heatDraw()
 		end
 		if onPlan then
 			local strength = 1 - (onPlan - 1) / 14
-			-- the way we are walking: violet, so it never reads as heat or as a climb marker
-			tile.Color = Color3.fromRGB(150, 90, 255):Lerp(Color3.fromRGB(225, 200, 255), strength)
-			tile.Transparency = 0.3 - strength * 0.22
+			-- the way we are walking: the only bright thing on screen
+			tile.Color = Color3.fromRGB(80, 230, 160)
+			tile.Transparency = 0.4 - strength * 0.3
 			-- stay flat: widen and sit a little prouder, never grow tall enough to read as a post
 			tile.Size = Vector3.new(pitch * 1.02, 0.16, pitch * 1.02)
 			tile.CFrame = CFrame.new(floor + Vector3.new(0, 0.16 + strength * 0.06, 0))
@@ -5237,15 +5230,15 @@ function esp.heatDraw()
 							local rise = reach > 0.01 and math.abs(span.Y) / reach or 0
 							-- a climb face is a vertical wall, not a route: mark its foot, do not lance the sky
 							if reach > 0.5 and reach <= 26 and rise <= 0.55 then
-								link.Size = Vector3.new(0.18, 0.18, reach)
+								link.Size = Vector3.new(0.14, 0.14, reach)
 								link.CFrame = CFrame.lookAt(from + span / 2, to)
-								link.Color = Color3.fromRGB(120, 245, 255)
-								link.Transparency = 0.35
+								link.Color = Color3.fromRGB(120, 132, 150)
+								link.Transparency = 0.55
 							elseif reach > 0.5 and reach <= 26 then
-								link.Size = Vector3.new(0.9, 0.9, 0.9)
-								link.CFrame = CFrame.new(from + Vector3.new(0, 0.4, 0))
-								link.Color = Color3.fromRGB(255, 170, 60)
-								link.Transparency = 0.3
+								link.Size = Vector3.new(0.7, 0.7, 0.7)
+								link.CFrame = CFrame.new(from + Vector3.new(0, 0.35, 0))
+								link.Color = Color3.fromRGB(120, 132, 150)
+								link.Transparency = 0.5
 							else
 								link.Size = Vector3.new(0.1, 0.1, 0.1)
 								link.CFrame = CFrame.new(from)
