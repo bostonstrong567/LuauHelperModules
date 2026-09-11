@@ -6232,6 +6232,7 @@ mapSec:Button({
 
 mapSec:IconButton({
 	Text = "Teleport to role",
+	Icon = "venetian-mask",
 	Tooltip = "Red goes to the murderer, blue to whoever holds the gun.",
 	Buttons = {
 		{
