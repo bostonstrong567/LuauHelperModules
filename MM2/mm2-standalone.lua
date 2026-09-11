@@ -5533,6 +5533,13 @@ end
 
 local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {} }
 
+function danger.corpseOf(body)
+	if Players:GetPlayerFromCharacter(body) then return true end
+	local hum = body:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health > 0 then return false end
+	return Players:FindFirstChild(body.Name) ~= nil or roleData()[body.Name] ~= nil
+end
+
 ------------------------------------------------------------------------------------------------- ESP
 -- Highlights and name tags for players, bodies, coins and guns.
 local function clearMap(map)
@@ -5635,7 +5642,7 @@ function esp.refreshBodies()
 	end
 	local keep = {}
 	for _, body in CollectionService:GetTagged("Ragdoll") do
-		if body:IsA("Model") and body:IsDescendantOf(Workspace) then
+		if body:IsA("Model") and body:IsDescendantOf(Workspace) and danger.corpseOf(body) then
 			keep[body] = true
 			if not esp.bodies[body] then
 				local hl = Instance.new("Highlight")
