@@ -532,6 +532,11 @@ end
 
 ---------------------------------------------------------------------------------------------- Status
 -- Status bar text and notifications.
+if getgenv().__MM2_HUB then
+	pcall(function() getgenv().__MM2_HUB:Destroy() end)
+	getgenv().__MM2_HUB = nil
+	task.wait(0.2)
+end
 for _, old in (gethui and gethui() or game:GetService("CoreGui")):GetChildren() do
 	if old:IsA("ScreenGui") and (old.Name == "rbxlolhub" or old.Name == "MM2Fov") then old:Destroy() end
 end
@@ -555,6 +560,8 @@ local win = Ember.new({
 		},
 	},
 })
+
+getgenv().__MM2_HUB = win
 
 local holdUntil = 0
 local shownStatus = nil
