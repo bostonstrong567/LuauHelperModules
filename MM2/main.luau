@@ -5202,13 +5202,19 @@ function esp.heatDraw()
 							local from = (node.Floor or node.Position) + Vector3.new(0, 0.6, 0)
 							local span = to - from
 							local reach = span.Magnitude
-							if reach > 0.5 and reach < 40 then
+							local rise = math.abs(span.Y)
+							-- a climb face is a vertical wall, not a route: mark its foot, do not lance the sky
+							if reach > 0.5 and reach <= 26 and rise <= 10 then
 								link.Size = Vector3.new(0.18, 0.18, reach)
 								link.CFrame = CFrame.lookAt(from + span / 2, to)
 								link.Color = Color3.fromRGB(120, 245, 255)
 								link.Transparency = 0.35
+							elseif reach > 0.5 and reach <= 26 then
+								link.Size = Vector3.new(0.9, 0.9, 0.9)
+								link.CFrame = CFrame.new(from + Vector3.new(0, 0.4, 0))
+								link.Color = Color3.fromRGB(255, 170, 60)
+								link.Transparency = 0.3
 							else
-								-- degenerate or absurd span: park it out of sight rather than draw a slab
 								link.Size = Vector3.new(0.1, 0.1, 0.1)
 								link.CFrame = CFrame.new(from)
 								link.Transparency = 1
