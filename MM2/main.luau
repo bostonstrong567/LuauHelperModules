@@ -96,6 +96,25 @@ local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
 local COIN_RETHINK = 0.5
 local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false }
+function danger.path(radius, spacing)
+	return PathfindingService:CreatePath({
+		AgentRadius = radius,
+		AgentHeight = 4.5,
+		AgentCanJump = true,
+		AgentCanClimb = true,
+		AgentMaxSlope = 60,
+		WaypointSpacing = spacing,
+	})
+end
+
+function danger.stopPursuit()
+	if coinRun and coinRun.kind == "pursuit" then
+		danger.pursuing = false
+		sniper.busy = false
+		cutRun()
+	end
+end
+
 function danger.foe()
 	local who = findByRole("Murderer")
 	return who and who ~= player and not isDead(who) and hitPartOf(who) or nil
@@ -105,6 +124,15 @@ function danger.handoff(target, valid, kind)
 	stopCoinRun()
 	while coinRun do RunService.Heartbeat:Wait() end
 	return newRun(target, valid, kind)
+end
+
+function danger.keepBest(best, at, score)
+	local worst = best[#best]
+	if #best < 8 or score > worst.score then
+		table.insert(best, { at = at, score = score })
+		table.sort(best, function(a, b) return a.score > b.score end)
+		if #best > 8 then table.remove(best) end
+	end
 end
 
 function danger.rayIgnoring(list)
@@ -1194,14 +1222,7 @@ function danger.shadow()
 end
 
 function danger.walkLength(from, to)
-	local path = PathfindingService:CreatePath({
-		AgentRadius = 2,
-		AgentHeight = 4.5,
-		AgentCanJump = true,
-		AgentCanClimb = true,
-		AgentMaxSlope = 60,
-		WaypointSpacing = 6,
-	})
+	local path = danger.path(2, 6)
 	local ok = pcall(path.ComputeAsync, path, from, to)
 	if not ok or path.Status ~= Enum.PathStatus.Success then return math.huge end
 	local len = 0
@@ -1456,14 +1477,7 @@ local function jumpNow()
 end
 
 local function routeTo(from, to)
-	local path = PathfindingService:CreatePath({
-		AgentRadius = 2.2,
-		AgentHeight = 4.5,
-		AgentCanJump = true,
-		AgentCanClimb = true,
-		AgentMaxSlope = 60,
-		WaypointSpacing = 4,
-	})
+	local path = danger.path(2.2, 4)
 	local ok = pcall(path.ComputeAsync, path, from, to)
 	if not ok or path.Status ~= Enum.PathStatus.Success then return nil end
 	local pts = path:GetWaypoints()
@@ -2004,14 +2018,7 @@ function danger.route(threat)
 	local root = myRoot()
 	if not root then return end
 	danger.routing = true
-	local path = PathfindingService:CreatePath({
-		AgentRadius = 2,
-		AgentHeight = 4.5,
-		AgentCanJump = true,
-		AgentCanClimb = true,
-		AgentMaxSlope = 60,
-		WaypointSpacing = 6,
-	})
+	local path = danger.path(2, 6)
 	local ok = pcall(path.ComputeAsync, path, threat.Position, root.Position)
 	local len = math.huge
 	danger.approach = nil
@@ -2486,12 +2493,7 @@ function danger.fleeLegs(root, threat)
 			if his / 18 < run / math.max(state.coinSpeed or 22, 16) + 0.5 then score -= 80 end
 			local hisWay = danger.flat(p, threat.Position)
 			if heading and hisWay.Magnitude > 1 then score -= 40 * math.max(0, heading:Dot(hisWay.Unit)) end
-			local worst = best[#best]
-			if #best < 8 or score > worst.score then
-				table.insert(best, { at = state.Lattice and state.Floor or p, score = score })
-				table.sort(best, function(a, b) return a.score > b.score end)
-				if #best > 8 then table.remove(best) end
-			end
+			danger.keepBest(best, state.Lattice and state.Floor or p, score)
 			return score
 		end,
 	})
@@ -2555,9 +2557,7 @@ function danger.floorAt(x, y, z)
 		if who.Character then table.insert(ignore, who.Character) end
 	end
 	for _ = 1, 4 do
-		local rp = RaycastParams.new()
-		rp.FilterType = Enum.RaycastFilterType.Exclude
-		rp.FilterDescendantsInstances = ignore
+		local rp = danger.rayIgnoring(ignore)
 		local hit = Workspace:Raycast(Vector3.new(x, y, z), Vector3.new(0, -45, 0), rp)
 		if not hit then return nil end
 		if hit.Instance.Transparency < 0.99 and hit.Instance.CanCollide then return hit.Position end
@@ -2601,12 +2601,7 @@ function danger.roamLegs(root, threatRoot)
 					if ahead and (p - ahead).Magnitude < 40 then return nil end
 					score += math.min(his, 150) * 0.6
 				end
-				local worst = best[#best]
-				if #best < 8 or score > worst.score then
-					table.insert(best, { at = state.Lattice and state.Floor or p, score = score })
-					table.sort(best, function(a, b) return a.score > b.score end)
-					if #best > 8 then table.remove(best) end
-				end
+				danger.keepBest(best, state.Lattice and state.Floor or p, score)
 				return score
 			end,
 		})
@@ -4091,11 +4086,7 @@ murderSec:Toggle({
 	Callback = function(on)
 		state.autoKillAll = on
 		if on then danger.moveGate = 0 if tryAuto then tryAuto() end end
-		if not on and coinRun and coinRun.kind == "pursuit" then
-			danger.pursuing = false
-			sniper.busy = false
-			cutRun()
-		end
+		if not on then danger.stopPursuit() end
 		say(on and "Auto kill all armed" or "Auto kill all off", "swords", on and "accent" or "muted")
 	end,
 })
@@ -4108,11 +4099,7 @@ murderSec:Toggle({
 	Callback = function(on)
 		state.autoKillSheriff = on
 		if on then danger.moveGate = 0 if tryAuto then tryAuto() end end
-		if not on and coinRun and coinRun.kind == "pursuit" then
-			danger.pursuing = false
-			sniper.busy = false
-			cutRun()
-		end
+		if not on then danger.stopPursuit() end
 		say(on and "Auto kill sheriff armed" or "Auto kill sheriff off", "shield-off", on and "accent" or "muted")
 	end,
 })
@@ -4156,11 +4143,7 @@ sheriffSec:Toggle({
 	Callback = function(on)
 		state.autoKillMurderer = on
 		if on then danger.moveGate = 0 if tryAuto then tryAuto() end end
-		if not on and coinRun and coinRun.kind == "pursuit" then
-			danger.pursuing = false
-			sniper.busy = false
-			cutRun()
-		end
+		if not on then danger.stopPursuit() end
 		say(on and "Auto kill murderer armed" or "Auto kill murderer off", "skull", on and "accent" or "muted")
 	end,
 })
