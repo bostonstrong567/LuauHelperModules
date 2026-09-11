@@ -3327,7 +3327,7 @@ function danger.closeBy(from, threat, within)
 end
 
 local function nearestCoin(from, now)
-	local best, bestDist, bestScore
+	local ranked = {}
 	local threat = danger.root()
 	local parts = coinParts()
 	local minGap = danger.safe
@@ -3355,10 +3355,19 @@ local function nearestCoin(from, now)
 					score += (60 - gap) * 2
 				end
 			end
-			if score and (not bestScore or score < bestScore) then best, bestDist, bestScore = part, d, score end
+			if score then table.insert(ranked, { part = part, dist = d, score = score }) end
 		end
 	end
-	return best, bestDist
+	table.sort(ranked, function(a, b) return a.score < b.score end)
+	for i = 1, math.min(#ranked, 8) do
+		local pick = ranked[i]
+		if danger.reachable(from, pick.part.Position) then
+			return pick.part, pick.dist
+		end
+	end
+	local fallback = ranked[1]
+	if fallback then return fallback.part, fallback.dist end
+	return nil, nil
 end
 
 function coin.first()
@@ -4146,6 +4155,12 @@ local function legsTo(from, goal, ignore)
 		best = legs
 	end
 	return best
+end
+
+function danger.reachable(here, goal)
+	if not nav.live() then return true end
+	if danger.straight(here, goal) then return true end
+	return legsTo(here, goal) ~= nil
 end
 
 local function newRun(target, valid, kind)
