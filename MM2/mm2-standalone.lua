@@ -3033,6 +3033,14 @@ local function droppedGuns()
 	return out
 end
 
+function danger.armed(who)
+	if not who or who == player then return false end
+	local char = who.Character
+	if char and char:FindFirstChild("Gun") then return true end
+	local pack = who:FindFirstChildOfClass("Backpack")
+	return pack ~= nil and pack:FindFirstChild("Gun") ~= nil
+end
+
 function danger.heldGuns()
 	local out = {}
 	for _, who in Players:GetPlayers() do
@@ -4363,7 +4371,7 @@ local function pursue(who, reach)
 	end
 	danger.pursuing = true
 	local run = danger.handoff(who, alive, "pursuit")
-	run.weave = who == gunHolder()
+	run.weave = danger.armed(who)
 	local hum = borrowMovement()
 	if not hum then
 		finishRun()
@@ -5522,7 +5530,7 @@ function sniper.duel(who, limit)
 			end
 			if dist < sniper.close then
 				sniper.backOff(run, hum, here, toward, entry, gunOff, who)
-			else
+			elseif danger.armed(who) then
 				sniper.status("Line is clear")
 				local side = Vector3.new(-toward.Z, 0, toward.X) * (sniper.side or 1)
 				local standUntil = os.clock() + 0.3
@@ -5534,13 +5542,17 @@ function sniper.duel(who, limit)
 					RunService.Heartbeat:Wait()
 				until os.clock() >= standUntil or not run.active
 				run.moveDir = nil
+			else
+				sniper.status("Line is clear")
+				run.moveDir = nil
+				RunService.Heartbeat:Wait()
 			end
 		elseif dist < sniper.close or (sniper.backingOff and dist < sniper.hold + 6) then
 			sniper.backingOff = true
 			sniper.backOff(run, hum, here, toward, entry, gunOff, who)
 		else
 			sniper.backingOff = false
-			local spot = dist <= sniper.far and (sniper.strafeSpot(here, toward, entry, gunOff, who, 1) or sniper.strafeSpot(here, toward, entry, gunOff, who, 2))
+			local spot = danger.armed(who) and dist <= sniper.far and (sniper.strafeSpot(here, toward, entry, gunOff, who, 1) or sniper.strafeSpot(here, toward, entry, gunOff, who, 2))
 			local heading = danger.heading(target)
 			local closing = heading ~= nil and heading:Dot(-toward) > 0.5
 			if spot then
@@ -5554,14 +5566,18 @@ function sniper.duel(who, limit)
 					sniper.goTo(run, hum, vantage, who, "Moving for a line")
 				else
 					sniper.status("Waiting for a line")
-					local side = Vector3.new(-toward.Z, 0, toward.X) * (sniper.side or 1)
-					local standUntil = os.clock() + 0.2
-					repeat
-						run.moveDir = side
-						if danger.canMove() then player:Move(side, false) end
+					if danger.armed(who) then
+						local side = Vector3.new(-toward.Z, 0, toward.X) * (sniper.side or 1)
+						local standUntil = os.clock() + 0.2
+						repeat
+							run.moveDir = side
+							if danger.canMove() then player:Move(side, false) end
+							RunService.Heartbeat:Wait()
+						until os.clock() >= standUntil or not run.active
+						sniper.side = -(sniper.side or 1)
+					else
 						RunService.Heartbeat:Wait()
-					until os.clock() >= standUntil or not run.active
-					sniper.side = -(sniper.side or 1)
+					end
 					run.moveDir = nil
 				end
 			elseif (sniper.noPath[who] or 0) > now then
