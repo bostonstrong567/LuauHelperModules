@@ -923,7 +923,9 @@ end
 local function shootFromHere(entry)
 	local shoot, aim, origin = readyGun(entry)
 	if not shoot then return false, aim end
-	return fire(shoot, entry, origin, aim)
+	local ok, why = fire(shoot, entry, origin, aim)
+	sheathe()
+	return ok, why
 end
 
 local function shootTarget(entry)
@@ -946,9 +948,11 @@ local function shootTarget(entry)
 	local ok, why = fire(shoot, entry, origin, aim)
 	if not ok then
 		releaseHold()
+		sheathe()
 		return false, why
 	end
 	task.delay(0.15, releaseHold)
+	sheathe()
 	return true
 end
 
@@ -982,6 +986,7 @@ local function sniperTick(now)
 		if legitOn("Shooting as sheriff") or hold.cf then
 			fireShot(shoot, origin.WorldCFrame, point, target.player.Name)
 			task.delay(0.15, releaseHold)
+			sheathe()
 		elseif not sniper.busy then
 			sniper.busy = true
 			task.spawn(function()
@@ -994,6 +999,7 @@ local function sniperTick(now)
 				end
 				end)
 				task.delay(0.15, releaseHold)
+				sheathe()
 				sniper.busy = false
 			end)
 		end
