@@ -4817,7 +4817,9 @@ setSec:Separator()
 setSec:Title({ Text = "CONFIG", Icon = "file-json" })
 
 ui.cfgGroup = setSec:Group({ Text = "Export and import", Icon = "file-json", Open = false })
-ui.cfgGroup:Description("Export copies every saved setting to your clipboard. Paste one in and press Import to apply it, then relaunch.")
+ui.cfgGroup:Description("Export copies every saved setting to the clipboard and writes rbxlolhub_config.json. Import reads that file back, so edit or replace it to share a default. Relaunch to apply.")
+
+ui.configFile = "rbxlolhub_config.json"
 
 ui.saveKeys = {
 	"legit4", "spareFriends", "target", "autoPickup", "aimFov", "showFov",
@@ -4841,7 +4843,7 @@ end
 
 ui.cfgGroup:Button({
 	Text = "Export to clipboard",
-	ButtonText = "Copy",
+	ButtonText = "Export",
 	ButtonIcon = "clipboard-copy",
 	Callback = function()
 		local okJson, json = pcall(function()
@@ -4852,26 +4854,26 @@ ui.cfgGroup:Button({
 			return
 		end
 		local okCopy = pcall(setclipboard, json)
-		report(okCopy, "Config copied, " .. #json .. " bytes", "clipboard unavailable")
+		local okFile = pcall(writefile, ui.configFile, json)
+		if okCopy or okFile then
+			say("Config saved, " .. #json .. " bytes", "clipboard-check", "accent")
+		else
+			report(false, nil, "could not copy or write the config")
+		end
 	end,
 })
 
-ui.configBox = ui.cfgGroup:Input({
-	Text = "Config",
-	Placeholder = "paste exported config here",
-	Style = "outline",
-})
-
 ui.cfgGroup:Button({
-	Text = "Import from the box above",
+	Text = "Import config",
+	Description = "Reads rbxlolhub_config.json from your executor's workspace folder.",
 	ButtonText = "Import",
 	ButtonIcon = "clipboard-paste",
 	Danger = true,
 	Click = { Icon = "check", Hold = 1 },
 	Callback = function()
-		local text = tostring(ui.configBox:Get() or "")
-		if #text < 2 then
-			report(false, nil, "paste a config first")
+		local okRead, text = pcall(readfile, ui.configFile)
+		if not okRead or type(text) ~= "string" or #text < 2 then
+			report(false, nil, "no " .. ui.configFile .. " to import")
 			return
 		end
 		local okJson, cfg = pcall(function()
