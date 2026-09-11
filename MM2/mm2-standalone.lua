@@ -7026,7 +7026,7 @@ local function autoPass()
 		end
 	end
 
-	if state.autoKillMurderer and findTool("Knife") then
+	if state.autoKillMurderer then
 		for _, e in aliveTargets() do
 			if e.role == "Murderer" then
 				attackBusy = true
@@ -7041,7 +7041,6 @@ end
 function tryAuto()
 	if autoBusy or sniper.busy then return end
 	if not (state.autoKillMurderer or state.autoKillAll or state.autoKillSheriff or state.autoPickup or danger.surviving()) then return end
-	if state.autoKillMurderer and not (state.autoKillAll or state.autoKillSheriff or state.autoPickup or danger.surviving()) and not findTool("Knife") then return end
 	if not canAct() then return end
 	autoBusy = true
 	task.spawn(function()
@@ -7402,7 +7401,7 @@ win:Track(RunService.Heartbeat:Connect(function()
 
 	if killBusy and coinRun and (coinRun.kind == "coins" or coinRun.kind == "survive") then stopCoinRun() end
 
-	if state.avoid and state.autoCoin and not danger.wanting() and T.actOk and not danger.fleeing and not danger.brainOn and not killBusy and now >= (danger.fleeSkipUntil or 0) then
+	if state.avoid and coinRun and coinRun.kind ~= "vote" and not danger.wanting() and T.actOk and not danger.fleeing and not danger.brainOn and not killBusy and now >= (danger.fleeSkipUntil or 0) then
 		local threat = danger.root()
 		local root = myRoot()
 		local closing = false
