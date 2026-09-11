@@ -7078,8 +7078,9 @@ function esp.heatDraw()
 
 	-- every way off this tile that is not plain walking: jumps, drops, climbs, ledges
 	-- one bar per affordance, not per entry node, or a shared ledge draws dozens
+	-- measured: these alone were 1836 parts and every millisecond of the frame cost
 	local drawnAff = {}
-	for _, node in nodes do
+	for _, node in (state.heatLinks and nodes or {}) do
 		if used > (state.heatTiles or 12000) + 2000 then break end
 		local okAff, list = pcall(function() return world:AffordancesAt(node) end)
 		if okAff and list then
