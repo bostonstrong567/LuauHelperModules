@@ -5668,11 +5668,6 @@ esp.tint = {
 
 esp.notBody = {}
 
-function esp.repaintRoles()
-	esp.clearLimbs(esp.highlights)
-	clearMap(esp.nameTags)
-end
-
 function esp.dropLimbs(set)
 	for _, hl in pairs(set.parts) do hl:Destroy() end
 	table.clear(set.parts)
@@ -5700,6 +5695,11 @@ local function clearMap(map)
 		inst:Destroy()
 		map[key] = nil
 	end
+end
+
+function esp.repaintRoles()
+	esp.clearLimbs(esp.highlights)
+	clearMap(esp.nameTags)
 end
 
 local function updateNameTag(who, char, role, colour)
