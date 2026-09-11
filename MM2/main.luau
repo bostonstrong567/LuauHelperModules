@@ -96,6 +96,17 @@ local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
 local COIN_RETHINK = 0.5
 local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false }
+function danger.foe()
+	local who = findByRole("Murderer")
+	return who and who ~= player and not isDead(who) and hitPartOf(who) or nil
+end
+
+function danger.handoff(target, valid, kind)
+	stopCoinRun()
+	while coinRun do RunService.Heartbeat:Wait() end
+	return newRun(target, valid, kind)
+end
+
 function danger.rayIgnoring(list)
 	local rp = RaycastParams.new()
 	rp.FilterType = Enum.RaycastFilterType.Exclude
@@ -1145,8 +1156,7 @@ function danger.root()
 		return nil
 	end
 	if armed then
-		local him = findByRole("Murderer")
-		local part = him and him ~= player and not isDead(him) and hitPartOf(him)
+		local part = danger.foe()
 		local me = myRoot()
 		if not (part and me and (part.Position - me.Position).Magnitude < KNIFE_REACH + 6) then
 			danger.rootWhy = "armed"
@@ -1318,8 +1328,7 @@ function coin.first()
 		coin.firstWas = false
 		return false
 	end
-	local who = findByRole("Murderer")
-	local threat = who and who ~= player and not isDead(who) and hitPartOf(who)
+	local threat = danger.foe()
 	local reach = findTool("Knife") and 15 or (findTool("Gun") and 40) or 0
 	local prey = reach > 0 and legalTargets()[1]
 	coin.firstWas = nearestCoin(root.Position, now) ~= nil and not (threat and danger.gap(root.Position, threat) < danger.near) and not (prey and prey.dist <= reach)
@@ -1971,8 +1980,7 @@ end
 function nav.route(from, goal, cheap)
 	if not nav.ready then return nil end
 	nav.calls += 1
-	local who = findByRole("Murderer")
-	local foe = who and who ~= player and not isDead(who) and hitPartOf(who) or nil
+	local foe = danger.foe()
 	local gap = foe and danger.gap(from, foe) or math.huge
 	local policies = UniversalNav.ProbePolicies
 	local policy = (cheap or gap < 90 or danger.pursuing) and policies.Never or policies.Conservative
@@ -2209,9 +2217,7 @@ local function grabDroppedGun()
 		local okRun, err = pcall(function()
 			if not legitOn("Walking to the dropped gun") and touchGun(gun) then return end
 			if not gunStillThere(gun) then return end
-			stopCoinRun()
-			while coinRun do RunService.Heartbeat:Wait() end
-			run = newRun(gun, gunStillThere, "gun")
+			run = danger.handoff(gun, gunStillThere, "gun")
 			run.targetDist = dist
 			local hum = borrowMovement()
 			if not hum then return end
@@ -2275,9 +2281,7 @@ local function pursue(who, reach)
 		return false
 	end
 	danger.pursuing = true
-	stopCoinRun()
-	while coinRun do RunService.Heartbeat:Wait() end
-	local run = newRun(who, alive, "pursuit")
+	local run = danger.handoff(who, alive, "pursuit")
 	run.weave = who == gunHolder()
 	local hum = borrowMovement()
 	if not hum then
@@ -2403,8 +2407,7 @@ end
 
 function danger.hazard(pos)
 	if not nav.navigator then return end
-	local who = findByRole("Murderer")
-	local part = who and who ~= player and not isDead(who) and hitPartOf(who)
+	local part = danger.foe()
 	if not part or (part.Position - pos).Magnitude < 60 then return end
 	nav.navigator:ReportLethal(pos)
 end
@@ -2517,9 +2520,7 @@ end
 
 function danger.flee(threat)
 	danger.fleeing = true
-	stopCoinRun()
-	while coinRun do RunService.Heartbeat:Wait() end
-	local run = newRun(threat, function(t) return t.Parent ~= nil end, "flee")
+	local run = danger.handoff(threat, function(t) return t.Parent ~= nil end, "flee")
 	run.speed = 25
 	local hum = borrowMovement()
 	if hum then
@@ -2697,9 +2698,7 @@ function danger.brain()
 		danger.brainOn = false
 		return
 	end
-	stopCoinRun()
-	while coinRun do RunService.Heartbeat:Wait() end
-	local run = newRun(nil, function() return true end, "survive")
+	local run = danger.handoff(nil, function() return true end, "survive")
 	danger.goalNow, danger.modeNow = nil, nil
 	local hum = borrowMovement()
 	if not hum then
@@ -3071,9 +3070,7 @@ end
 
 function vote.walk(det)
 	vote.walking = true
-	stopCoinRun()
-	while coinRun do RunService.Heartbeat:Wait() end
-	local run = newRun(det, function(d) return d.Parent ~= nil end, "vote")
+	local run = danger.handoff(det, function(d) return d.Parent ~= nil end, "vote")
 	local hum = borrowMovement()
 	local root = myRoot()
 	if hum and root then
@@ -3099,9 +3096,7 @@ function vote.stepOff(board)
 		local flat = danger.flat(det.Position, root.Position)
 		if flat.Magnitude < 4.5 then
 			vote.walking = true
-			stopCoinRun()
-			while coinRun do RunService.Heartbeat:Wait() end
-			local run = newRun(det, function(d) return d.Parent ~= nil end, "vote")
+			local run = danger.handoff(det, function(d) return d.Parent ~= nil end, "vote")
 			local hum = borrowMovement()
 			if hum then
 				local away = Vector3.new(0, 0, -9)
@@ -3407,9 +3402,7 @@ function sniper.duel(who, limit)
 		return hitPartOf(who) ~= nil and not isDead(who)
 	end
 	danger.pursuing = true
-	stopCoinRun()
-	while coinRun do RunService.Heartbeat:Wait() end
-	local run = newRun(who, alive, "pursuit")
+	local run = danger.handoff(who, alive, "pursuit")
 	run.speed = 25
 	local hum = borrowMovement()
 	if not hum then
