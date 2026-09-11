@@ -1002,6 +1002,7 @@ local function sniperTick(now)
 
 	sniper.blockedSince = sniper.blockedSince or now
 	if (sniper.noPath[target.player] or 0) > now then return end
+	if range > sniper.reach then return end
 	if now - sniper.blockedSince > 0.15 and not sniper.busy then
 		sniper.busy = true
 		task.spawn(function()
@@ -5157,7 +5158,7 @@ local function autoPass()
 		return
 	end
 
-	if state.autoKillSheriff and findTool("Knife") then
+	if state.autoKillSheriff then
 		local who = gunHolder()
 		if who and not isDead(who) and not danger.friend(who) and hitPartOf(who) then
 			attackBusy = true
