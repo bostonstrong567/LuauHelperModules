@@ -1952,7 +1952,7 @@ local AIM_FOV_MAX = 800
 local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
 local COIN_RETHINK = 0.5
-local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false, touchWas = setmetatable({}, { __mode = "k" }), touchOff = false }
+local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false, touchWas = {}, touchOff = false }
 function danger.path(radius, spacing)
 	return PathfindingService:CreatePath({
 		AgentRadius = radius,
@@ -3223,12 +3223,13 @@ function danger.untouchable(on)
 			if on then
 				if danger.touchWas[part] == nil then danger.touchWas[part] = part.CanTouch end
 				part.CanTouch = false
-			elseif danger.touchWas[part] ~= nil then
-				part.CanTouch = danger.touchWas[part]
-				danger.touchWas[part] = nil
+			else
+				local was = danger.touchWas[part]
+				part.CanTouch = was == nil or was
 			end
 		end
 	end
+	if not on then table.clear(danger.touchWas) end
 end
 
 function danger.guardTouch()
