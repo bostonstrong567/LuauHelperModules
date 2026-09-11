@@ -2562,7 +2562,7 @@ function danger.canStepOver(root, dir)
 	local reach = math.max(root.Size.Z, 2) + 1.5
 	local rp = excludeMe()
 	rp.RespectCanCollide = true
-	local clear = hum.HipHeight + 0.6
+	local clear = hum.HipHeight
 	-- something at shin height that the body clears by walking is not an obstacle
 	local low = Workspace:Raycast(Vector3.new(root.Position.X, foot + 0.25, root.Position.Z), dir * reach, rp)
 	if not low then return false end
