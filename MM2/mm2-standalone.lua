@@ -1952,7 +1952,7 @@ local AIM_FOV_MAX = 800
 local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
 local COIN_RETHINK = 0.5
-local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false, touchWas = {}, touchOff = false }
+local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false, touchWas = {}, touchOff = false, knifeSeen = {} }
 function danger.path(radius, spacing)
 	return PathfindingService:CreatePath({
 		AgentRadius = radius,
@@ -2039,6 +2039,18 @@ end
 
 local function legitOn(what)
 	return state.legit and state.legitFor[what] == true
+end
+
+function danger.sawKnife(who)
+	if not who then return end
+	local char = who.Character
+	if char and char:FindFirstChild("Knife") then danger.knifeSeen[who] = true end
+end
+
+function danger.drawnKnife(who)
+	if not legitOn("Wait until the knife is drawn") then return true end
+	if not who then return false end
+	return danger.knifeSeen[who] == true
 end
 
 local session = {
@@ -2388,11 +2400,17 @@ end
 
 ---------------------------------------------------------------------------------------------- Status
 -- Status bar text and notifications.
+if type(getgenv().__MM2_HUBS) ~= "table" then getgenv().__MM2_HUBS = {} end
+for i = #getgenv().__MM2_HUBS, 1, -1 do
+	local old = getgenv().__MM2_HUBS[i]
+	getgenv().__MM2_HUBS[i] = nil
+	pcall(function() old:Destroy() end)
+end
 if getgenv().__MM2_HUB then
 	pcall(function() getgenv().__MM2_HUB:Destroy() end)
 	getgenv().__MM2_HUB = nil
-	task.wait(0.2)
 end
+task.wait(0.2)
 for _, old in (gethui and gethui() or game:GetService("CoreGui")):GetChildren() do
 	if old:IsA("ScreenGui") and (old.Name == "rbxlolhub" or old.Name == "MM2Fov") then old:Destroy() end
 end
@@ -2418,6 +2436,7 @@ local win = Ember.new({
 })
 
 getgenv().__MM2_HUB = win
+table.insert(getgenv().__MM2_HUBS, win)
 
 local holdUntil = 0
 local shownStatus = nil
@@ -2931,7 +2950,7 @@ local function legalTargets()
 	if findTool("Knife") then return list end
 	local out = {}
 	for _, e in list do
-		if e.role == "Murderer" then table.insert(out, e) end
+		if e.role == "Murderer" and danger.drawnKnife(e.player) then table.insert(out, e) end
 	end
 	return out
 end
@@ -6146,9 +6165,9 @@ local combatSec = win.Sections[1]
 
 combatSec:Dropdown({
 	Text = "Legit mode",
-	Description = "Ticked actions move like a real player. Unticked ones teleport.",
+	Description = "Ticked actions move like a real player. Unticked ones teleport. Waiting for the knife holds off hunting the murderer until they have drawn it at least once this round, so the kill looks like a reaction.",
 	Icon = "footprints",
-	Options = { "Walking to the dropped gun", "Shooting as sheriff", "Stabbing as murderer", "Running as innocent" },
+	Options = { "Walking to the dropped gun", "Shooting as sheriff", "Stabbing as murderer", "Running as innocent", "Wait until the knife is drawn" },
 	Multi = true,
 	Style = "check",
 	Default = { "Shooting as sheriff", "Stabbing as murderer", "Running as innocent" },
@@ -6860,11 +6879,28 @@ function esp.heatClear()
 	end
 end
 
+function esp.heatColour(fraction)
+	-- cold blue, through green and yellow, to hot red
+	local stops = {
+		Color3.fromRGB(40, 90, 235),
+		Color3.fromRGB(40, 200, 180),
+		Color3.fromRGB(70, 220, 90),
+		Color3.fromRGB(240, 220, 60),
+		Color3.fromRGB(240, 140, 50),
+		Color3.fromRGB(230, 50, 50),
+	}
+	local f = math.clamp(fraction, 0, 1) * (#stops - 1)
+	local low = math.floor(f)
+	local pick = stops[low + 1]
+	local next_ = stops[math.min(low + 2, #stops)]
+	return pick:Lerp(next_, f - low)
+end
+
 function esp.heatDraw()
 	local root = myRoot()
 	if not root or not nav.live() then return end
 	local now = os.clock()
-	if now - esp.heat.at < 0.4 then return end
+	if now - esp.heat.at < 0.35 then return end
 	esp.heat.at = now
 	if not esp.heat.folder or not esp.heat.folder.Parent then
 		local folder = Instance.new("Folder")
@@ -6874,56 +6910,40 @@ function esp.heatDraw()
 		table.clear(esp.heat.tiles)
 	end
 	local here = root.Position
-	local nodes = nav.world:Nearby(here, state.heatRange or 90)
-	local shown = {}
-	for i, node in nodes do
-		if i > (state.heatTiles or 260) then break end
-		local tile = esp.heat.tiles[i]
+	local range = state.heatRange or 110
+	local nodes = nav.world:Nearby(here, range)
+	local pitch = nav.world.cell or 4
+	local shown = 0
+	for _, node in nodes do
+		shown += 1
+		if shown > 900 then break end
+		local tile = esp.heat.tiles[shown]
 		if not tile or not tile.Parent then
 			tile = Instance.new("Part")
 			tile.Name = "Tile"
 			tile.Anchored, tile.CanCollide, tile.CanTouch, tile.CanQuery = true, false, false, false
-			tile.Size = Vector3.new(2.4, 0.2, 2.4)
 			tile.Material = Enum.Material.Neon
-			tile.Transparency = 0.4
+			tile.TopSurface, tile.BottomSurface = Enum.SurfaceType.Smooth, Enum.SurfaceType.Smooth
 			tile.Parent = esp.heat.folder
-			esp.heat.tiles[i] = tile
+			esp.heat.tiles[shown] = tile
 		end
-		tile.Position = (node.Floor or node.Position) + Vector3.new(0, 0.25, 0)
-		local okReach, reach = pcall(danger.reachable, here, node.Position)
+		tile.Size = Vector3.new(pitch, 0.15, pitch)
+		tile.Position = (node.Floor or node.Position) + Vector3.new(0, 0.12, 0)
+		local away = danger.flat(node.Position, here).Magnitude / range
 		local okRisk, risk = pcall(function() return nav.world:Risk(node) end)
 		risk = okRisk and type(risk) == "number" and risk or 0
-		if okReach and reach then
-			tile.Color = Color3.fromRGB(60, 220, 90):Lerp(Color3.fromRGB(240, 200, 60), math.clamp(risk, 0, 1))
-		else
-			tile.Color = Color3.fromRGB(230, 60, 60)
-		end
-		shown[i] = true
+		local climb = math.abs(node.Position.Y - here.Y) / 24
+		local heat = math.clamp(away * 0.7 + climb * 0.2 + risk * 1.5, 0, 1)
+		tile.Color = esp.heatColour(heat)
+		tile.Transparency = 0.45
 	end
-	for i, tile in esp.heat.tiles do
-		if not shown[i] then
-			tile:Destroy()
+	for i = shown + 1, #esp.heat.tiles do
+		if esp.heat.tiles[i] then
+			esp.heat.tiles[i]:Destroy()
 			esp.heat.tiles[i] = nil
 		end
 	end
 end
-
-espSec:Toggle({
-	Text = "Lattice heatmap",
-	Description = "Debug view of the map's pathfinding lattice. Green means the router can reach that tile, yellow means it costs more, red means it cannot. Temporary, for diagnosing routing.",
-	Icon = "grid-3x3",
-	Callback = function(on)
-		state.heatmap = on
-		if not on then
-			esp.heatClear()
-			return
-		end
-		esp.heat.conn = RunService.Heartbeat:Connect(function()
-			if not state.heatmap then return end
-			pcall(esp.heatDraw)
-		end)
-	end,
-})
 ---------------------------------------------------------------------- END DEBUG HEATMAP (temporary)
 
 local statsSec = win:Section("Stats", "activity")
@@ -6986,6 +7006,42 @@ S.acctSurvivals = statsSec:Status({ Text = "Survivals", Default = "loading", Ico
 S.acctVictories = statsSec:Status({ Text = "Victories", Default = "loading", Icon = "trophy" })
 
 local setSec = win:Section("Settings", "settings")
+
+------------------------------------------------------------------ BEGIN DEBUG TOGGLES (temporary)
+setSec:Title({ Text = "DEBUGGING", Icon = "bug" })
+
+setSec:Toggle({
+	Text = "Lattice heatmap",
+	Description = "Fills the walkable map around you with the pathfinding lattice, cool where it is close and cheap, hot where it is far, raised or awkward. For diagnosing routing; delete when done.",
+	Icon = "grid-3x3",
+	Callback = function(on)
+		state.heatmap = on
+		if not on then
+			esp.heatClear()
+			return
+		end
+		if esp.heat.conn then return end
+		esp.heat.conn = RunService.Heartbeat:Connect(function()
+			if not state.heatmap then return end
+			pcall(esp.heatDraw)
+		end)
+	end,
+})
+
+setSec:Slider({
+	Text = "Heatmap range",
+	Description = "How far the heatmap fills, in studs.",
+	Icon = "ruler",
+	Min = 40,
+	Max = 220,
+	Default = 110,
+	Suffix = " studs",
+	Callback = function(v) state.heatRange = v end,
+})
+
+setSec:Separator()
+-------------------------------------------------------------------- END DEBUG TOGGLES (temporary)
+
 setSec:Title({ Text = "INTERFACE", Icon = "layout" })
 
 setSec:Keybind({
@@ -7516,6 +7572,7 @@ local function onMapGone()
 	if round.countedRole and not round.died and not amDead() then bump("survived") end
 	round.countedRole = nil
 	table.clear(round.seenGuns)
+	table.clear(danger.knifeSeen)
 	table.clear(grab.failed)
 	table.clear(myAttacks)
 	forgetCoinHooks()
@@ -7775,6 +7832,9 @@ win:Track(RunService.Heartbeat:Connect(function()
 		T.tick = now
 		danger.watchThrows()
 		danger.guardTouch()
+		for _, who in Players:GetPlayers() do
+			if who ~= player and not danger.knifeSeen[who] then danger.sawKnife(who) end
+		end
 		local liveMap = getMap()
 		if liveMap ~= nav.map and now - T.navFix > 5 then
 			T.navFix = now
