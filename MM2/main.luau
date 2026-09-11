@@ -107,25 +107,6 @@ function danger.path(radius, spacing)
 	})
 end
 
-function danger.stopPursuit()
-	if coinRun and coinRun.kind == "pursuit" then
-		danger.pursuing = false
-		sniper.busy = false
-		cutRun()
-	end
-end
-
-function danger.foe()
-	local who = findByRole("Murderer")
-	return who and who ~= player and not isDead(who) and hitPartOf(who) or nil
-end
-
-function danger.handoff(target, valid, kind)
-	stopCoinRun()
-	while coinRun do RunService.Heartbeat:Wait() end
-	return newRun(target, valid, kind)
-end
-
 function danger.keepBest(best, at, score)
 	local worst = best[#best]
 	if #best < 8 or score > worst.score then
@@ -473,6 +454,11 @@ end
 local function hitPartOf(who)
 	local c = who.Character
 	return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+function danger.foe()
+	local who = findByRole("Murderer")
+	return who and who ~= player and not isDead(who) and hitPartOf(who) or nil
 end
 
 function danger.offMap(who)
@@ -1454,6 +1440,14 @@ local function cutRun()
 	halt()
 end
 
+function danger.stopPursuit()
+	if coinRun and coinRun.kind == "pursuit" then
+		danger.pursuing = false
+		sniper.busy = false
+		cutRun()
+	end
+end
+
 local function finishRun(keepMoving)
 	local run = coinRun
 	coinRun = nil
@@ -2092,6 +2086,12 @@ local function newRun(target, valid, kind)
 	coinRun = run
 	danger.run = run
 	return run
+end
+
+function danger.handoff(target, valid, kind)
+	stopCoinRun()
+	while coinRun do RunService.Heartbeat:Wait() end
+	return newRun(target, valid, kind)
 end
 
 ------------------------------------------------------------------------------------------- Coin runs
