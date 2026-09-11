@@ -6866,7 +6866,7 @@ ui.colourSec:ColorPicker({
 -- Draws the lattice around you, green where the router can reach and red where it cannot.
 -- Everything lives on esp.heat and under one MM2Heat folder, so deleting this fenced block
 -- and the esp.heat teardown line in OnDestroy removes it completely.
-esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }) }
+esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }) }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -6935,6 +6935,13 @@ function esp.heatDraw()
 		return
 	end
 	local now = os.clock()
+	if esp.heat.world ~= nav.world then
+		-- new lattice: draw at once rather than waiting out the throttle
+		esp.heat.world = nav.world
+		esp.heat.at = 0
+		table.clear(esp.heat.pieces)
+		table.clear(esp.heat.risks)
+	end
 	if now - esp.heat.at < 0.35 then return end
 	esp.heat.at = now
 	if not esp.heat.folder or not esp.heat.folder.Parent then
@@ -6974,7 +6981,7 @@ function esp.heatDraw()
 
 	for _, node in nodes do
 		used += 1
-		if used > 1200 then break end
+		if used > (state.heatTiles or 4000) then break end
 		local tile = esp.heatTile(used)
 		local floor = node.Floor or node.Position
 		local head = node.Clear or pitch
