@@ -6921,7 +6921,15 @@ end
 
 function esp.heatDraw()
 	local root = myRoot()
-	if not root or not nav.live() then return end
+	if not root or not nav.live() then
+		-- the lattice went away with the map: drop the tiles rather than leave them behind
+		if esp.heat.folder then
+			esp.heat.folder:Destroy()
+			esp.heat.folder = nil
+			table.clear(esp.heat.tiles)
+		end
+		return
+	end
 	local now = os.clock()
 	if now - esp.heat.at < 0.35 then return end
 	esp.heat.at = now
@@ -6941,6 +6949,23 @@ function esp.heatDraw()
 	local mine = standing and esp.heatPiece(standing) or nil
 	local nodes = world:Nearby(here, range)
 	local used = 0
+
+	-- the route we are actually walking, so the planned way through stands out
+	local plan = {}
+	local run = coinRun
+	if run and run.active and run.points then
+		local leg = math.max(run.leg or 1, 1)
+		local ahead = 0
+		for i = leg, #run.points do
+			local wp = run.points[i]
+			local at = type(wp) == "table" and wp.Position or wp
+			if at then
+				ahead += 1
+				if ahead > 14 then break end
+				table.insert(plan, { at = at, order = ahead })
+			end
+		end
+	end
 
 	for _, node in nodes do
 		used += 1
@@ -6966,6 +6991,21 @@ function esp.heatDraw()
 		else
 			tile.Color = esp.heatColour(heat)
 			tile.Transparency = 0.45
+		end
+
+		-- on the planned route: brighten it, strongest at the leg we are walking now
+		local onPlan
+		for _, step in plan do
+			if danger.flat(step.at, node.Position).Magnitude <= pitch and math.abs(step.at.Y - node.Position.Y) < 8 then
+				if not onPlan or step.order < onPlan then onPlan = step.order end
+			end
+		end
+		if onPlan then
+			local strength = 1 - (onPlan - 1) / 14
+			tile.Color = tile.Color:Lerp(Color3.fromRGB(255, 255, 255), 0.35 + strength * 0.5)
+			tile.Transparency = 0.32 - strength * 0.2
+			tile.Size = Vector3.new(pitch, 0.15 + strength * 0.45, pitch)
+			tile.Position = floor + Vector3.new(0, 0.12 + strength * 0.22, 0)
 		end
 	end
 
