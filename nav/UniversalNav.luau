@@ -1,21 +1,5 @@
 --!native
 --!optimize 2
--- UniversalNav: a navigation framework that searches any state space you describe, and discovers
--- what the world lets an agent do rather than being told.
---
--- The core knows only states, transitions, costs, goals and revisions. Around it:
---   Perception   scanners that turn a world into candidate affordances: semantic (what Roblox says a
---                thing is) and geometric (what the lattice's own topology suggests)
---   Affordances  the registry of what the world offers, with evidence from three sources and memory
---                keyed by game, object, kind and mechanism
---   Capabilities what an agent can do, read from the agent, plus the runtime probe that turns an
---                untrusted candidate into a fact by trying it and watching the body
---   Traversal    providers that emit a transition only where an affordance meets a capability
---   Search       backends behind a registry; weighted A* is one of them
---   Cost         models that turn a transition's raw measures into one number
---   Cache        transitions per (world revision, agent signature)
---   Roblox       geometry queries, the humanoid adapter and the climb executor, at the edge
--- Nothing in here knows about any particular game.
 local UniversalNav = { Version = "0.7.12" }
 
 local RunService = game:GetService("RunService")
@@ -23,10 +7,10 @@ local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
 
 -------------------------------------------------------------------------------------------------- Core
+-- States, transitions and world revisions: the only vocabulary the search reads.
 local Core = {}
 UniversalNav.Core = Core
 
--- A transition is the only thing the search ever reads: where it goes and what it costs in raw terms
 function Core.transition(from, to, kind, time, distance, risk, data)
 	return { From = from, To = to, Kind = kind, Time = time, Distance = distance, Risk = risk or 0, Data = data }
 end
@@ -47,10 +31,10 @@ end
 Core.flatBetween = flatBetween
 
 ---------------------------------------------------------------------------------------------- Search
+-- Search backends behind a registry; weighted A* with a binary heap is the default.
 local Search = { Registry = {} }
 UniversalNav.Search = Search
 
--- Binary heap keyed on f with lazy deletion; stale entries are skipped by the closed set
 local Heap = {}
 Heap.__index = Heap
 Search.PriorityQueue = Heap
@@ -98,9 +82,6 @@ function Heap:pop()
 	return top
 end
 
--- Weighted A*: f = g + epsilon * h; epsilon 1 is plain A*. Starts and goals are transition sets, so
--- connectors from and to free positions cost nothing special.
--- ctx: Expand(state) -> transitions, Cost(transition), Heuristic(state), Blocked(state), Allowed(transition), Yield(), Cap
 function Search.WeightedAStar(starts, goals, ctx, epsilon)
 	local open = Heap.new()
 	local g, cameBy, closed = {}, {}, {}
@@ -160,6 +141,7 @@ function Search.Registry.AStar(starts, goals, ctx)
 end
 
 ------------------------------------------------------------------------------------------------ Cost
+-- Turns a transition's raw time, distance and risk into the one number A* sorts on.
 local Cost = {}
 UniversalNav.Cost = Cost
 
@@ -175,7 +157,6 @@ Cost.Safest = {
 	Of = function(t) return t.Time + t.Risk * 3 end,
 	Heuristic = function(a, b, agent) return (b - a).Magnitude / agent:MaxSpeed() end,
 }
--- Time and distance weights give a lower bound directly; risk is never below zero so it adds nothing
 function Cost.Composite(weights)
 	local wt, wd, wr = weights.Time or 0, weights.Distance or 0, weights.Risk or 0
 	return {
@@ -188,10 +169,10 @@ function Cost.Composite(weights)
 end
 
 ----------------------------------------------------------------------------------------------- Cache
+-- Transitions per world revision and agent signature; five keys kept, oldest dropped.
 local Cache = {}
 UniversalNav.Cache = Cache
 
--- Transitions out of a state, kept per (world revision, agent signature); a new key drops the old store
 local TransitionCache = {}
 TransitionCache.__index = TransitionCache
 Cache.TransitionCache = TransitionCache
@@ -200,8 +181,6 @@ function TransitionCache.new()
 	return setmetatable({ key = nil, store = {}, failed = {}, walks = {}, kept = {}, order = {}, hits = 0, misses = 0 }, TransitionCache)
 end
 
--- Every key keeps its own store, so an agent whose signature changes and changes back (a run speed
--- that varies with the errand) finds its transitions where it left them; the oldest of five is dropped
 function TransitionCache:use(key)
 	if self.key == key then return end
 	local set = self.kept[key]
@@ -214,7 +193,6 @@ function TransitionCache:use(key)
 	self.key, self.store, self.failed, self.walks = key, set.store, set.failed, set.walks
 end
 
--- A walk reads the same from either end, so the pair measured from one end answers the other
 function TransitionCache:walkBetween(a, b)
 	local list = self.walks[b]
 	return list and list[a]
@@ -229,8 +207,6 @@ function TransitionCache:rememberWalk(a, b, result)
 	list[b] = result
 end
 
--- A search that exhausted the graph between two points is remembered for a moment, so the same
--- unreachable goal asked again a frame later costs nothing
 function TransitionCache:failedBetween(a, b)
 	local list = self.failed[a]
 	return list ~= nil and (list[b] or 0) > os.clock()
@@ -256,15 +232,10 @@ function TransitionCache:set(state, list)
 end
 
 ----------------------------------------------------------------------------------------- Affordances
+-- What the world offers and what bodies learned by trying it, keyed per game and mechanism.
 local Affordances = { Threshold = 0.5 }
 UniversalNav.Affordances = Affordances
 
--- An affordance is what a piece of the world offers an agent that can use it:
--- { Kind, Object, Entry, Exit, Face, Normal, Axis, Height, Mechanism, Evidence, Key }
--- Evidence keeps its three sources apart: Semantic (what the platform says), Geometry (what the shape
--- suggests) and Behavioral (what happened when a body tried). A fact outranks a prior.
-
--- What makes two objects "the same thing": class, mesh, tags, attributes and size to the stud
 function Affordances.signature(object)
 	local parts = { object.ClassName }
 	if object:IsA("MeshPart") then table.insert(parts, object.MeshId) end
@@ -282,14 +253,10 @@ function Affordances.signature(object)
 	return table.concat(parts, "|")
 end
 
--- What kind of thing this is, with no body in it: whether a ladder can be climbed at all is a fact about
--- ladders, so it is learned once and every agent inherits it.
 function Affordances.key(object, kind, mechanism)
 	return tostring(game.GameId) .. "|" .. Affordances.signature(object) .. "|" .. kind .. "|" .. mechanism
 end
 
--- The same mechanism as performed by one shape of body. Whether a given agent can actually get up that
--- ladder, and how fast, is a fact about the pairing, so a small agent's success is never a tall one's.
 function Affordances.execKey(key, agent)
 	return key .. "#" .. agent:Family()
 end
@@ -306,7 +273,6 @@ function Memory.entry(key)
 	return k
 end
 
--- Learned behaviour for a key: nil until a body has tried
 function Memory.behavioral(key)
 	local k = Memory.known[key]
 	if not k or k.Successes + k.Failures == 0 then return nil end
@@ -330,11 +296,8 @@ function Memory.report(key, ok, measured)
 	return Memory.behavioral(key)
 end
 
--- Places that killed an agent with no visible cause, per world: the same outcome feedback as a failed
--- move, kept for as long as the library lives so the next visit to that world routes around them
 Memory.lethal = {}
 
--- One death is a suspicion, a second within 15 studs is a fact: consumers ask with the count they need
 function Memory.reportLethal(worldKey, pos)
 	local list = Memory.lethal[worldKey]
 	if not list then
@@ -365,9 +328,6 @@ function Memory.model(key)
 	return k and k.Model or nil
 end
 
--- Trust: a fact from memory, else a strong platform statement, else nothing until probed. What the
--- platform itself vouches for keeps the benefit of the doubt through a couple of failed attempts,
--- since a missed attach is usually the body's fault, not the surface's.
 function Affordances.trust(aff, exec)
 	local key = exec or aff.Key
 	local learned = Memory.behavioral(key)
@@ -383,12 +343,10 @@ function Affordances.plausible(aff)
 end
 
 ------------------------------------------------------------------------------------------ Perception
+-- Scanners that find candidate affordances: what the platform says, and what the shape suggests.
 local Perception = {}
 UniversalNav.Perception = Perception
 
--- Portals: the faces of an object a body can touch, the lattice points that reach each face, and the
--- points a body can step onto from the top. Everything is measured in the object's own frame and
--- verified with casts; nothing here asks what the object is called. The caller supplies the evidence.
 Perception.Portals = { Reach = 8, Step = 4 }
 
 local function reachClear(a, b, geo)
@@ -398,8 +356,6 @@ local function reachClear(a, b, geo)
 	return not geo:Raycast(a, b) and not geo:Raycast(knee0, knee1)
 end
 
--- The object's own axis that points up in the world, whichever of its three it is, with its extent along
--- it and the two lateral axes with their half extents; a part rotated any way is read the same
 function Perception.Portals.frame(part)
 	local cf, size = part.CFrame, part.Size
 	local axes = { { cf.RightVector, size.X }, { cf.UpVector, size.Y }, { cf.LookVector, size.Z } }
@@ -417,7 +373,6 @@ function Perception.Portals.frame(part)
 	return { Up = up, Height = axes[upIndex][2], Lateral = lateral }
 end
 
--- A face is real when a ray from a body's width in front of it, at knee height above the foot, hits the object
 function Perception.Portals.faces(part, lattice)
 	local frame = Perception.Portals.frame(part)
 	if not frame then return {} end
@@ -442,7 +397,6 @@ function Perception.Portals.tall(part)
 	return frame and frame.Height or 0
 end
 
--- Entries: lattice points near the foot that a walk reaches; exits: points around the top a step reaches
 function Perception.Portals.portals(face, lattice)
 	local geo, lift = lattice.geometry, lattice.lift
 	local entries, exits = {}, {}
@@ -461,7 +415,6 @@ function Perception.Portals.portals(face, lattice)
 	return entries, exits
 end
 
--- One SurfaceTraversal affordance per usable face of an object
 function Perception.Portals.affordances(part, lattice, mechanism, evidence)
 	local out = {}
 	for _, face in Perception.Portals.faces(part, lattice) do
@@ -487,8 +440,6 @@ function Perception.Portals.affordances(part, lattice, mechanism, evidence)
 	return out
 end
 
--- Semantic scanner: the cheap, certain layer. The platform says a truss climbs, so every usable face of
--- a truss is a SurfaceTraversal with semantic evidence 1; the portals are still measured, never assumed.
 Perception.SemanticScanner = { Name = "Semantic" }
 
 function Perception.SemanticScanner.scan(model, lattice)
@@ -503,13 +454,6 @@ function Perception.SemanticScanner.scan(model, lattice)
 	return found
 end
 
--- Surface topology scanner: the lattice's own shape points at interesting places. A low point next to
--- a much higher point, close in plan, with a near-vertical face between them, names an object worth
--- portals; the affordance carries geometric evidence only until a body has tried one of its kind.
--- MaxPair bounds how far apart two lattice points may be in height and still be treated as naming
--- the same face; it is a scan budget, not a statement about how tall a climbable thing may be. The
--- affordance's real extent is measured from the object itself, so a face taller than this is still
--- found and still offered at its true height whenever any pair along it falls inside the budget.
 Perception.SurfaceTopology = { Name = "Topology", MaxPair = 40, MinClimb = 6.5, Reach = 2 }
 
 function Perception.SurfaceTopology.scan(model, lattice)
@@ -550,11 +494,10 @@ function Perception.SurfaceTopology.scan(model, lattice)
 end
 
 ----------------------------------------------------------------------------------------- Capabilities
+-- What an agent can do, plus the runtime probe that proves an untrusted surface by trying it.
 local Capabilities = {}
 UniversalNav.Capabilities = Capabilities
 
--- What a humanoid can do, read from the humanoid rather than assumed; VerifiedClimb is unknown until
--- a probe proves the world's climb surfaces actually move this body
 function Capabilities.inspectHumanoid(hum)
 	return {
 		Ground = true,
@@ -564,7 +507,6 @@ function Capabilities.inspectHumanoid(hum)
 	}
 end
 
--- Motion observer: one window of watching a body, and what the window says about it
 Capabilities.MotionObserver = {}
 
 function Capabilities.MotionObserver.start(root, hum)
@@ -578,7 +520,6 @@ function Capabilities.MotionObserver.sample(obs, root, hum, touching, dt)
 	if touching then obs.contact += dt end
 end
 
--- Sustained rise while in contact is climbing whatever the platform's state machine says
 function Capabilities.MotionObserver.interpret(obs, root, hum, elapsed)
 	local rise = root.Position.Y - obs.pos.Y
 	local climbing = obs.climbingSeen or (rise >= 2 and obs.contact >= elapsed * 0.6)
@@ -594,14 +535,8 @@ function Capabilities.MotionObserver.interpret(obs, root, hum, elapsed)
 	}
 end
 
--- Probes run only when a route needs an untrusted candidate, the geometry is plausible, the kind of
--- surface has never been tried, and the query's probe policy allows it. How long to try, how much
--- movement proves the mechanism, and how much risk to accept come from the policy, never from a fixed
--- world limit: a hundred-stud ladder is proven by the first few studs of ascent. Once proven, the whole
--- traversal is trusted like any known surface.
 Capabilities.RuntimeProbe = { Defaults = { MaxTime = 1.5, VerificationRise = 3, MaxRisk = 0.25, Budget = 3 }, spent = 0, world = nil }
 
--- The effective probe policy for one affordance: the query's values, else the agent's, else defaults
 function Capabilities.RuntimeProbe.policy(query, agent, aff)
 	local given = type(query.ProbePolicy) == "table" and query.ProbePolicy or {}
 	local d = Capabilities.RuntimeProbe.Defaults
@@ -613,11 +548,6 @@ function Capabilities.RuntimeProbe.policy(query, agent, aff)
 	}
 end
 
--- Whether an unproven surface is worth an experiment now. One missed attach used to end the matter
--- for good: a single failure gives a behavioral score of 1/3, which is under the trust threshold, and
--- the old rule refused to probe anything that had any observation at all. So the candidate could
--- neither be trusted nor tried again, which is the opposite of learning. A failure now costs
--- confidence and a cooling period, and only a run of them closes the question.
 function Capabilities.RuntimeProbe.allowed(aff, policy, exec)
 	if not Affordances.plausible(aff) then return false end
 	local k = Memory.known[exec or aff.Key]
@@ -630,8 +560,6 @@ function Capabilities.RuntimeProbe.allowed(aff, policy, exec)
 	return (aff.Risk or 0) <= policy.MaxRisk
 end
 
--- A probe that failed backs the surface off for a while, longer each time, so a candidate is retried
--- but never hammered. Cleared by the first success.
 function Capabilities.RuntimeProbe.cool(key)
 	local k = Memory.entry(key)
 	k.ProbeAgain = os.clock() + math.min(20 * (k.Failures + 1), 120)
@@ -647,7 +575,6 @@ function Capabilities.RuntimeProbe.spend()
 	Capabilities.RuntimeProbe.spent += 1
 end
 
--- Ready-made policies a consumer picks from; a table of its own works the same
 UniversalNav.ProbePolicies = {
 	Never = { Mode = "Never" },
 	Conservative = { Mode = "WhenNecessary", MaxTime = 1.5, VerificationRise = 3, MaxRisk = 0.25, Budget = 3 },
@@ -655,10 +582,10 @@ UniversalNav.ProbePolicies = {
 }
 
 ---------------------------------------------------------------------------------------------- Roblox
+-- The platform edge: geometry casts, the humanoid adapter, and the climb and jump executors.
 local Roblox = {}
 UniversalNav.Roblox = Roblox
 
--- Geometry queries against the Workspace with a caller-supplied ignore list; counts every query
 local WorkspaceGeometry = {}
 WorkspaceGeometry.__index = WorkspaceGeometry
 Roblox.WorkspaceGeometry = WorkspaceGeometry
@@ -686,15 +613,10 @@ function WorkspaceGeometry:Blockcast(from, to, size)
 	return Workspace:Blockcast(CFrame.new(from), size, to - from, self.rp)
 end
 
--- A Roblox humanoid as an agent: body size, the speeds it moves at, and what it can do
 local HumanoidAdapter = {}
 HumanoidAdapter.__index = HumanoidAdapter
 Roblox.HumanoidAdapter = HumanoidAdapter
 
--- opts: Humanoid (function), Speed (function), JumpVelocity (function), Radius, Height, ClimbFactor
--- Humanoid may be the instance itself or a getter returning it. A character respawns, so callers that
--- can supply a getter should; taking the instance directly is accepted rather than failing later inside
--- a capability check with "attempt to call an Instance value".
 function HumanoidAdapter.new(opts)
 	local hum = opts.Humanoid
 	return setmetatable({
@@ -717,8 +639,6 @@ function HumanoidAdapter:JumpVelocity() return self.jumpVelocity() end
 function HumanoidAdapter:Gravity() return Workspace.Gravity end
 function HumanoidAdapter:Size() return Vector3.new(self.radius, self.height, self.radius) end
 
--- What this body steps over without jumping, and the steepest rise per unit of run it walks up a slope
--- or stair: the live humanoid's own slope limit, never past 70 degrees
 function HumanoidAdapter:Step() return self.step end
 function HumanoidAdapter:Slope()
 	if self.slope then return self.slope end
@@ -726,19 +646,12 @@ function HumanoidAdapter:Slope()
 	return math.tan(math.rad(math.min(hum and hum.MaxSlopeAngle or 70, 70)))
 end
 
--- Where the body's reference point sits above the floor, and the clearance it needs to stand
 function HumanoidAdapter:Lift() return self.height / 2 + 0.25 end
 function HumanoidAdapter:Headroom() return self.height end
 
--- How far this body may fall on purpose, and the flat gap past which a downhill move is a jump rather
--- than a walk. Both are properties of the body, not of the world: a Roblox humanoid takes any fall
--- without damage, something else may take none at all.
 function HumanoidAdapter:MaxDrop() return self.maxDrop end
 function HumanoidAdapter:GapDown() return self.gapDown end
 
--- The apex is what the body reaches with nothing to spare, and a landing there is one the feet clip:
--- the usable rise keeps a margin below it, so a jump the model offers is one the body still has room
--- to finish. The reach is measured the same way, over the airtime that remains at that rise.
 function HumanoidAdapter:JumpEnvelope()
 	local v, g, speed = self:JumpVelocity(), self:Gravity(), self:Speed()
 	local rise = v * v / (2 * g) - self:Step()
@@ -747,8 +660,6 @@ function HumanoidAdapter:JumpEnvelope()
 	return { MaxUp = rise, MaxFlat = flat }
 end
 
--- How fast this body climbs this thing. Only a rate this shape of body actually measured counts; a
--- rate learned by a different shape says nothing about what this one can do.
 function HumanoidAdapter:ClimbSpeed(key)
 	local model = key and Memory.model(Affordances.execKey(key, self))
 	if model and model.Speed and model.Speed > 1 then return model.Speed end
@@ -760,7 +671,6 @@ function HumanoidAdapter:Capabilities()
 	return hum and Capabilities.inspectHumanoid(hum) or { Ground = true }
 end
 
--- The providers this agent's capabilities admit
 function HumanoidAdapter:Providers()
 	local can = self:Capabilities()
 	local Traversal = UniversalNav.Traversal
@@ -770,8 +680,6 @@ function HumanoidAdapter:Providers()
 	return list
 end
 
--- Bodies that execute a mechanism the same way share what they learn about it. Height and reach are
--- bucketed so that a nudge to walk speed does not throw away everything this shape of body has learned.
 function HumanoidAdapter:Family()
 	return string.format("%d:%d:%d", math.floor(self.height * 2 + 0.5), math.floor(self.radius * 2 + 0.5), math.floor(self:JumpEnvelope().MaxUp / 2 + 0.5))
 end
@@ -782,11 +690,6 @@ function HumanoidAdapter:Signature()
 	return string.format("%.2f|%.2f|%.2f|%.1f|%.1f|%s", self.speed(), self.jumpVelocity(), Workspace.Gravity, self.radius, self.height, table.concat(names, ","))
 end
 
--- Climb executor and probe in one. Phases: approach the foot of the face, attach by moving into the
--- surface (shifting a little to each side when the body does not take), confirm by the observer, ascend
--- to the crest, dismount toward the chosen exit, confirm ground. Every outcome is reported to memory
--- under the affordance's key, with the measured climb speed.
--- io: Root() -> part, Humanoid() -> humanoid, Move(dir), Jump(), Active() -> bool
 Roblox.ClimbExecutor = { Approach = 3, Attach = 1.5, Dismount = 3 }
 
 function Roblox.ClimbExecutor.run(transition, io)
@@ -900,15 +803,8 @@ function Roblox.ClimbExecutor.run(transition, io)
 	return abort()
 end
 
----- Jump executor: one jump between two points, run as the physics says. The body runs at the landing
--- along the move's line and takes off at the speed that lands it a body's width past the landing (so
--- the feet are still above a lip when the front of the body meets it): running flat out when the
--- landing is far, easing off when it is near, backing up when it is too near to jump at all. In the
--- air it holds that speed and confirms where it came down.
--- io: Root(), Humanoid(), Move(dir), Jump(), Active(), Lift() -> the agent's node height
 Roblox.JumpExecutor = { Approach = 4, Runway = 3, Landing = 3, Edge = 1.5 }
 
--- Seconds in the air from a takeoff at v to a landing dy higher, on the way down; nil when out of reach
 local function airtime(v, g, dy)
 	local under = v * v - 2 * g * dy
 	if under < 0 then return nil end
@@ -1006,16 +902,10 @@ function Roblox.JumpExecutor.run(transition, io)
 end
 
 ----------------------------------------------------------------------------------------- Steering
--- Look is the distance the body checks ahead, and it has to be far enough that the turn can finish
--- before the wall arrives: a fixed six studs at twenty-five studs a second gives a quarter second of
--- warning for a turn that takes a third, so the body is committed to clipping it before it ever sees
--- it. It scales with speed, with the fixed value as a floor for a body barely moving.
+-- Per-frame heading: the wanted way when the body fits, else the smallest bend that has room.
 local Steering = { Name = "Steering", Look = 6, Ahead = 0.5, Fan = 14, Widest = 170, Keep = 0.35, Clearance = 0.6, Forward = -0.1, Commit = 0.25, Escape = 1.2 }
 UniversalNav.Steering = Steering
 
--- How far the body gets along a heading before something it cannot walk over stops it. The body is
--- swept from where it stands to the far end of the look, at the height it clears steps from, so the
--- answer is the distance the walker really has and not the distance to whatever a thin ray found.
 function Steering.Room(from, dir, ctx, look)
 	local agent, geo = ctx.Agent, ctx.Geometry
 	if not geo.rp then geo:params() end
@@ -1028,8 +918,6 @@ function Steering.Room(from, dir, ctx, look)
 	return math.max((hit.Position - (from + centre)).Magnitude - Steering.Clearance, 0), hit
 end
 
--- Whether the body can stand where a heading would put it: floor within a step of the level it walks
--- at, so a heading over a lip the walker would fall off is not offered as open ground.
 function Steering.Footing(from, dir, ctx, dist)
 	local agent, geo = ctx.Agent, ctx.Geometry
 	local at = from + dir * dist
@@ -1038,12 +926,6 @@ function Steering.Footing(from, dir, ctx, dist)
 	return math.abs((hit.Position.Y + agent:Lift()) - from.Y) <= agent:Step() * 2
 end
 
--- The heading to walk this frame. The wanted direction is taken whole when the body fits along it.
--- Otherwise headings are tried outward from it in even steps to either side, and the first that has
--- both room and footing wins, so the walk bends by the least it can rather than sliding off a face.
--- A heading already committed to is held while it still has room, which is what stops the left-right
--- flicker of two directions that alternately look best. Nothing open means nothing is returned, and
--- the caller has a real answer to act on instead of a body pushing into a wall.
 function Steering.Heading(from, want, ctx, memo)
 	memo = memo or {}
 	ctx.Geometry:params()
@@ -1085,18 +967,12 @@ function Steering.Heading(from, want, ctx, memo)
 end
 
 ----------------------------------------------------------------------------------------- Traversal
+-- Providers that emit a move only where an affordance meets a capability.
 local Traversal = {}
 UniversalNav.Traversal = Traversal
 
--- Every provider answers two questions: which transitions leave a lattice state, and whether one
--- specific pair of positions is joined by its move. The second is what start and goal connectors use.
 Traversal.Ground = { Name = "Ground" }
 
--- A walk: the body above the height it steps over, swept from one point to the other, meets nothing,
--- so a wall, a beam over a doorway or a frame too narrow refuse it while a step, a curb or a stair
--- does not. A level walk needs floor under its midpoint; a slope or stair steeper than a step but
--- within the agent's slope needs floor at every step-sized interval between the two heights, so a
--- ledge with nothing between, or a stack of ledges, is left to the jump.
 function Traversal.Ground.Between(a, b, ctx)
 	local dy = b.Y - a.Y
 	local rise = math.abs(dy)
@@ -1137,7 +1013,6 @@ end
 
 Traversal.Drop = { Name = "Drop" }
 
--- Walk to above the landing, then fall: the body is swept along both parts
 function Traversal.Drop.Between(a, b, ctx)
 	local dy = b.Y - a.Y
 	if dy >= -ctx.Agent:Step() or -dy > ctx.Agent:MaxDrop() then return nil end
@@ -1159,8 +1034,6 @@ end
 
 Traversal.Jump = { Name = "Jump", Setup = 0.3 }
 
--- The arc the executor flies: airborne until the feet come down to the landing's height, at the run
--- speed that covers the flat distance in exactly that time; the body is swept along it in four pieces
 function Traversal.Jump.Between(a, b, ctx)
 	local flat = flatBetween(a, b)
 	local dy = b.Y - a.Y
@@ -1190,11 +1063,6 @@ function Traversal.Jump.Between(a, b, ctx)
 	}
 end
 
--- Only where walking cannot already get there, read off the walks already generated for this state: a
--- neighbour a walk reaches is never jumped to, and a farther cell is jumped to only when the first cell
--- on the way is missing or not walkable, so open floor costs no casts at all. A landing below within a
--- short plan distance is a walk off the edge, never a jump: leaving the rim at full speed carries the
--- body past the opening. Only a gap wider than that is jumped down across.
 function Traversal.Jump.Generate(state, ctx, out)
 	local envelope = ctx.Agent:JumpEnvelope()
 	local rings = math.ceil(envelope.MaxFlat / ctx.World.cell)
@@ -1223,10 +1091,6 @@ end
 
 Traversal.Climb = { Name = "Climb", Standoffs = { 1.2, 1.6 } }
 
--- The column of the face this body rises through: its box is swept from the floor to above the crest
--- where a climbing body hangs, at a few standoffs from the surface and lateral offsets up to its own
--- width, and the first clear one is where the climb starts and is held. Measured once per face and
--- body; a face with no clear column is not climbable by this body from this side.
 function Traversal.Climb.Column(aff, floorY, ctx)
 	local sig = ctx.Agent:Signature()
 	aff.Columns = aff.Columns or {}
@@ -1255,9 +1119,6 @@ function Traversal.Climb.Column(aff, floorY, ctx)
 	return found or nil
 end
 
--- A climb exists where the world offers a surface traversal whose entries include this state, the
--- agent can climb, and the body fits the face: one transition per exit, so the search picks the
--- dismount that serves the route. The search decides whether to trust or probe the affordance behind it.
 function Traversal.Climb.Generate(state, ctx, out)
 	for _, aff in ctx.World:AffordancesAt(state) do
 		if aff.Kind == "SurfaceTraversal" then
@@ -1281,18 +1142,14 @@ function Traversal.Climb.Between()
 end
 
 ----------------------------------------------------------------------------------------------- World
+-- Surface lattice: a standable point every few studs on every floor, with headroom and neighbours.
 local World = {}
 UniversalNav.World = World
 
--- Surface lattice: a standable point every few studs on every floor of a model, found by casting down
--- each column; a heightfield of spans with headroom. Neighbours by ring, affordances at points, coarse
--- pieces for early rejection. Knows nothing about who walks on it.
 local SurfaceLattice = {}
 SurfaceLattice.__index = SurfaceLattice
 World.SurfaceLattice = SurfaceLattice
 
--- opts: Model, Geometry, Cell, Lift, Layers, Probe (how far up a ceiling is looked for), MinClear (the
--- smallest ceiling any body could use), Reach (the flat distance a join may span), Step, Rise, Scanners
 function SurfaceLattice.new(opts)
 	return setmetatable({
 		model = opts.Model,
@@ -1317,7 +1174,6 @@ function SurfaceLattice.new(opts)
 	}, SurfaceLattice)
 end
 
--- What this world is across rebuilds: the place and the model's name
 function SurfaceLattice:Key()
 	return tostring(game.PlaceId) .. "|" .. tostring(self.model and self.model.Name)
 end
@@ -1335,8 +1191,6 @@ function SurfaceLattice:cellOf(pos)
 	return math.floor(pos.X / self.cell + 0.5), math.floor(pos.Z / self.cell + 0.5)
 end
 
--- Every floor under one column, top down. The ceiling over each floor is measured, not tested against one
--- body: Clear is how much room the surface actually has, and each agent decides at query time whether it fits.
 function SurfaceLattice:column(ix, iz, top, bottom)
 	local x, z = ix * self.cell, iz * self.cell
 	local geo = self.geometry
@@ -1369,7 +1223,6 @@ function SurfaceLattice:column(ix, iz, top, bottom)
 	end
 end
 
--- Builds over a few frames once the model's bounding box has stopped growing, then runs the scanners
 function SurfaceLattice:Build()
 	local model = self.model
 	local size
@@ -1412,7 +1265,6 @@ function SurfaceLattice:Abort()
 	self.Ready = false
 end
 
--- The same face of the same object seen by two scanners is one affordance with the stronger evidence of each
 function SurfaceLattice:AddAffordance(aff)
 	for _, had in self.affordances do
 		if had.Object == aff.Object and had.Kind == aff.Kind and (had.Normal - aff.Normal).Magnitude < 0.1 then
@@ -1440,7 +1292,6 @@ function SurfaceLattice:AffordancesAt(n)
 	return self.byEntry[n] or none
 end
 
--- The node in exactly this cell near this height, or nothing
 function SurfaceLattice:NodeInCell(pos, tolerance)
 	local list = self:list(self:cellOf(pos))
 	if not list then return nil end
@@ -1502,7 +1353,6 @@ function SurfaceLattice:Neighbours(n, ring, flatLimit)
 	return out
 end
 
--- A point is a lip when a neighbouring cell has no floor at its level; routes keep off lips when they can
 function SurfaceLattice:Risk(n)
 	if n.risk == nil then
 		n.risk = 0
@@ -1524,12 +1374,6 @@ function SurfaceLattice:Risk(n)
 	return n.risk
 end
 
--- Coarse connectivity: whatever a walk, drop, jump or affordance could possibly join, either way.
--- This is only the "certainly apart?" prefilter, so it must be undirected: a climb is offered from
--- its foot to its top, and a flood that happened to start at the top could not walk it backwards,
--- which split a ladder's two ends into different pieces and let FindPath refuse a real route before
--- the search ever saw it. Union-find joins both ends of every possible connection regardless of the
--- direction it would be travelled in. Direction belongs to the search, not to this test.
 function SurfaceLattice:findPieces()
 	local parent = {}
 	local function find(a)
@@ -1601,11 +1445,11 @@ function SurfaceLattice:Piece(n)
 end
 
 ------------------------------------------------------------------------------------------- Navigator
+-- Ties world, cache and backend together; every query brings its own agent, cost and goal.
 local Navigator = {}
 Navigator.__index = Navigator
 UniversalNav.Navigator = Navigator
 
--- Ties a world, a cache and a search backend together; every query brings its own agent, cost and goal
 function Navigator.new(opts)
 	return setmetatable({
 		world = opts.World,
@@ -1624,15 +1468,12 @@ function Navigator.new(opts)
 	}, Navigator)
 end
 
--- A move the body failed once is left out for half a minute, one it failed twice for the rest of this world
 function Navigator:Distrusted(from, to)
 	local list = self.distrust[from]
 	local entry = list and list[to]
 	return entry ~= nil and entry.until_ > os.clock()
 end
 
--- A move the search would refuse without a probe: an unproven surface is not ground a plan can be
--- made over, so a caller asking where it can get to is told the same thing a route would tell it
 function Navigator:trusted(t)
 	local aff = t.Data and t.Data.Affordance
 	if not aff then return true end
@@ -1640,21 +1481,14 @@ function Navigator:trusted(t)
 	return Affordances.trust(aff, self:execKey(aff)) >= Affordances.Threshold
 end
 
--- The record of this mechanism as performed by the body currently being routed
 function Navigator:execKey(aff)
 	return self.family and (aff.Key .. "#" .. self.family) or nil
 end
 
--- A cold block is about one physical thing, never a kind of thing. The affordance key describes a shape
--- of object, so a building's twelve identical ladders share it; blocking on that key means one bad mount
--- refuses every ladder in the building and strands the body at the foot of all of them.
 function Navigator:coldKey(aff)
 	return aff.Object or aff.Key
 end
 
--- A search that exhausted the graph has visited everything its start can reach; that closed set is
--- kept for a few seconds, and any later query starting inside it whose goal lies outside it is
--- answered at once without expanding anything
 function Navigator:apart(start, goals)
 	local kept = self.reach
 	if not kept or kept.key ~= self.cache.key or os.clock() - kept.at > 3 or not kept.set[start] then return false end
@@ -1664,9 +1498,6 @@ function Navigator:apart(start, goals)
 	return true
 end
 
--- Connectors: the moves that join a free position to the world, validated exactly like any other move.
--- Nearest points first; walks within a short radius are enough when any exist, and only when none do
--- are drops and jumps out to the full radius tried, so a query on open floor costs a handful of rays.
 function Navigator:looseKey(pos)
 	return string.format("%d,%d,%d", math.floor(pos.X / 4), math.floor(pos.Y / 4), math.floor(pos.Z / 4))
 end
@@ -1714,7 +1545,6 @@ function Navigator:connect(pos, ctx, outward)
 	return out, free
 end
 
--- The transitions leaving a state, generated once per world revision and agent signature
 function Navigator:expand(state, ctx)
 	local cache = ctx.Cache
 	local list = cache:get(state)
@@ -1742,11 +1572,6 @@ function Navigator:expand(state, ctx)
 	return list
 end
 
--- Somewhere the agent can actually get to, and get back from. Reachable ground is walked outward from
--- where it stands through the same transitions a route would use, so every answer is a place a plan
--- exists for, not a spot a ray happened to find; a pit floor with no way up is never offered, because
--- nothing reaches it. Candidates are scored by the caller and the best is returned, so the same call
--- serves fleeing, roaming and patrolling. Reach bounds the walk, Nodes the work spent on it.
 function Navigator:Reachable(query)
 	local world, agent = self.world, query.Agent
 	if not world.Ready then return nil end
@@ -1790,11 +1615,6 @@ function Navigator:Reachable(query)
 	return best, bestScore
 end
 
--- Generating the ground around the agent ahead of any route, a slice at a time. The walk is resumed,
--- never restarted: a frontier is kept per world revision and agent, so each call carries on outward
--- from where the last one stopped instead of re-expanding the cached nodes nearest the agent and
--- never reaching new ground. It is re-seeded when the world changes, when the agent's shape changes,
--- or when the agent has walked out of the region the frontier covers.
 function Navigator:Warm(query)
 	local world, agent = self.world, query.Agent
 	if not world.Ready then return 0 end
@@ -1834,11 +1654,6 @@ function Navigator:Warm(query)
 	return done
 end
 
--- query: Agent, Start, Goal, Cost (model), Blocked (state -> bool), Algorithm, Epsilon, Cap,
--- ProbePolicy ("WhenNecessary": an unproven plausible surface may be tried when nothing known reaches
--- the goal; "Never": known surfaces only)
--- result: Ok, Why, Path (transitions from the free start to the free goal), Time (seconds along it),
--- Probing (true when the path leans on an untrusted candidate the executor must probe), Stats
 function Navigator:FindPath(query)
 	local world, agent = self.world, query.Agent
 	local t0 = os.clock()
@@ -1940,8 +1755,6 @@ function Navigator:FindPath(query)
 	return finish(why, path, expanded)
 end
 
--- The one move that joins two free positions directly, if any provider has it; the movement system's
--- answer to "can I just go there", which a clear line of sight is not
 function Navigator:DirectTransition(query)
 	local world, agent = self.world, query.Agent
 	local geo = world.geometry
@@ -1954,10 +1767,6 @@ function Navigator:DirectTransition(query)
 	return nil
 end
 
--- The move the body actually failed earns a lasting refusal; its neighbours, distrusted because they
--- end where it did, earn only a temporary one. A wall is a hint about a place, not proof that every
--- move into it is impassable, and a permanent ban on a neighbour never tried would close ground off
--- for the rest of the map on the strength of one failure somewhere near it.
 function Navigator:distrustEdge(from, to, kind, spread)
 	local list = self.distrust[from]
 	if not list then
@@ -1974,7 +1783,6 @@ function Navigator:distrustEdge(from, to, kind, spread)
 	list[to] = { count = count, until_ = until_ }
 end
 
--- Execution feedback of the last kind: the agent died here with nothing visible to blame
 function Navigator:ReportLethal(pos)
 	self.reach = nil
 	return Memory.reportLethal(self.world:Key(), pos)
@@ -1984,9 +1792,6 @@ function Navigator:Lethal(pos, within, minCount)
 	return Memory.isLethal(self.world:Key(), pos, within, minCount)
 end
 
--- Execution feedback: a failed move is distrusted, a failed walk or jump takes the others of its kind out
--- of the same state that head the same way with it (the wall or ledge that stopped one stops them all),
--- and a transition that worked or failed teaches the memory behind its affordance
 function Navigator:Report(transition, outcome, measured)
 	local ok = outcome
 	if type(outcome) == "table" then
