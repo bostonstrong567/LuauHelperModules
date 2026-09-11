@@ -7543,6 +7543,7 @@ win:Track(RunService.Heartbeat:Connect(function()
 		end
 		if delta < 5 then totals.playtime += delta end
 		if state.roleEsp then refreshRoleEsp() end
+		if state.gunEsp then refreshGunEsp() end
 		local xp = profileXP()
 		if type(xp) == "number" and session.lastXp and xp > session.lastXp then
 			totals.xp += xp - session.lastXp
