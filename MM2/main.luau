@@ -5023,7 +5023,8 @@ ui.colourSec:ColorPicker({
 esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, trapsAt = 0,
 	pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }),
 	shade = setmetatable({}, { __mode = "k" }), traps = setmetatable({}, { __mode = "k" }),
-	lit = setmetatable({}, { __mode = "k" }), cutOf = setmetatable({}, { __mode = "k" }), was = nil }
+	lit = setmetatable({}, { __mode = "k" }), cutOf = setmetatable({}, { __mode = "k" }), was = nil,
+	owner = setmetatable({}, { __mode = "k" }) }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -5038,6 +5039,21 @@ function esp.heatClear()
 	for _, old in Workspace:GetChildren() do
 		if old.Name == "MM2Heat" then old:Destroy() end
 	end
+end
+
+function esp.heatCone()
+	-- What the camera can actually see, as plain arithmetic.
+	-- WorldToViewportPoint on every node measured 5.98ms a frame, more than the
+	-- draw it was meant to save; a dot product against the look vector is free.
+	local cam = Workspace.CurrentCamera
+	if not cam then return nil end
+	local cf = cam.CFrame
+	local vp = cam.ViewportSize
+	-- half the diagonal field of view, widened so tiles at the edge are already drawn
+	local vertical = math.rad(cam.FieldOfView) / 2
+	local aspect = vp.Y > 0 and vp.X / vp.Y or 1.7
+	local widest = math.atan(math.tan(vertical) * math.sqrt(1 + aspect * aspect))
+	return cf.Position, cf.LookVector, math.cos(math.min(widest + 0.25, 1.5))
 end
 
 function esp.heatColour(fraction)
@@ -5107,12 +5123,38 @@ function esp.heatDraw()
 	end
 
 	local here = root.Position
-	local range = state.heatRange or 110
+	local range = state.heatRange or 200
 	local world = nav.world
 	local pitch = world.cell or 4
 	local standing = world:NodeAt(here, 8)
 	local mine = standing and esp.heatPiece(standing) or nil
-	local nodes = world:Nearby(here, range)
+	local eye, look, minDot = esp.heatCone()
+	local nodes = {}
+	if eye then
+		-- the whole map is a candidate; the camera decides what is worth a part
+		for _, byZ in pairs(world.columns) do
+			for _, list in pairs(byZ) do
+				for _, node in list do
+					local to = node.Position - eye
+					local far = to.Magnitude
+					if far <= range then
+						-- behind the camera, or outside the cone: never drawn, never paid for
+						if far < 12 or to.Unit:Dot(look) >= minDot then
+							table.insert(nodes, node)
+						end
+					end
+				end
+			end
+		end
+	else
+		nodes = world:Nearby(here, range)
+	end
+	-- a dense map can still overflow the budget: keep the near ones, drop the rest
+	if #nodes > (state.heatTiles or 2200) then
+		table.sort(nodes, function(a, b)
+			return (a.Position - here).Magnitude < (b.Position - here).Magnitude
+		end)
+	end
 	local used = 0
 	local flatSize = Vector3.new(pitch, 0.15, pitch)
 
@@ -5150,7 +5192,7 @@ function esp.heatDraw()
 
 	for _, node in nodes do
 		used += 1
-		if used > (state.heatTiles or 12000) then break end
+		if used > (state.heatTiles or 2200) then break end
 		local tile = esp.heatTile(used)
 		local floor = node.Floor or node.Position
 		local head = node.Clear or pitch
@@ -5193,12 +5235,17 @@ function esp.heatDraw()
 			want, fade = esp.heatColour(heat), 0.62 - heat * 0.22
 		end
 		-- only write when it actually differs: property writes are the whole cost here
-		local shown = esp.heat.lit[tile]
-		if not shown or math.abs(shown - heat) > 0.02 or cut ~= esp.heat.cutOf[tile] then
+		local shown = esp.heat.lit[node]
+		-- pooled parts change owner as the camera turns: a recycled tile must repaint
+		if esp.heat.owner[tile] ~= node then
+			shown = nil
+			esp.heat.owner[tile] = node
+		end
+		if not shown or math.abs(shown - heat) > 0.02 or cut ~= esp.heat.cutOf[node] then
 			tile.Color = want
 			tile.Transparency = fade
-			esp.heat.lit[tile] = heat
-			esp.heat.cutOf[tile] = cut
+			esp.heat.lit[node] = heat
+			esp.heat.cutOf[node] = cut
 		end
 
 		-- on the planned route: brighten it, strongest at the leg we are walking now
@@ -5213,7 +5260,7 @@ function esp.heatDraw()
 			-- the way we are walking: the only bright thing on screen
 			tile.Color = Color3.fromRGB(80, 230, 160)
 			tile.Transparency = 0.4 - strength * 0.3
-			esp.heat.lit[tile] = nil
+			esp.heat.lit[node] = nil
 			-- stay flat: widen and sit a little prouder, never grow tall enough to read as a post
 			tile.Size = Vector3.new(pitch * 1.02, 0.16, pitch * 1.02)
 			tile.CFrame = CFrame.new(floor + Vector3.new(0, 0.16 + strength * 0.06, 0))
@@ -5225,7 +5272,7 @@ function esp.heatDraw()
 	-- measured: these alone were 1836 parts and every millisecond of the frame cost
 	local drawnAff = {}
 	for _, node in (state.heatLinks and nodes or {}) do
-		if used > (state.heatTiles or 12000) + 2000 then break end
+		if used > (state.heatTiles or 2200) + 800 then break end
 		local okAff, list = pcall(function() return world:AffordancesAt(node) end)
 		if okAff and list then
 			for _, aff in list do
@@ -5236,7 +5283,7 @@ function esp.heatDraw()
 						local to = exit.Position or exit.Floor
 						if to then
 							used += 1
-							if used > (state.heatTiles or 12000) + 2000 then break end
+							if used > (state.heatTiles or 2200) + 800 then break end
 							local link = esp.heatTile(used)
 							local from = (node.Floor or node.Position) + Vector3.new(0, 0.6, 0)
 							local span = to - from
@@ -5361,8 +5408,8 @@ setSec:Slider({
 	Description = "How far the heatmap fills, in studs.",
 	Icon = "ruler",
 	Min = 40,
-	Max = 220,
-	Default = 110,
+	Max = 400,
+	Default = 200,
 	Suffix = " studs",
 	Callback = function(v) state.heatRange = v end,
 })
