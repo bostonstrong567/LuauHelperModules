@@ -3896,10 +3896,27 @@ function nav.jumpV()
 	return math.sqrt(2 * Workspace.Gravity * hum.JumpHeight)
 end
 
+function nav.body()
+	local char = myChar()
+	if not char then return 2, 4.5 end
+	local widest, lowest, highest = 0, nil, nil
+	for _, part in char:GetChildren() do
+		if part:IsA("BasePart") and part.Name ~= "Handle" then
+			widest = math.max(widest, part.Size.X, part.Size.Z)
+			local half = part.Size.Y / 2
+			highest = highest and math.max(highest, part.Position.Y + half) or (part.Position.Y + half)
+			lowest = lowest and math.min(lowest, part.Position.Y - half) or (part.Position.Y - half)
+		end
+	end
+	if not lowest or widest <= 0 then return 2, 4.5 end
+	return math.max(widest, 1), math.max(highest - lowest, 2)
+end
+
 function nav.build(map)
 	nav.reset()
 	nav.map = map
-	local agent = UniversalNav.Roblox.HumanoidAdapter.new({ Humanoid = myHumanoid, Speed = nav.speed, JumpVelocity = nav.jumpV })
+	local radius, height = nav.body()
+	local agent = UniversalNav.Roblox.HumanoidAdapter.new({ Humanoid = myHumanoid, Speed = nav.speed, JumpVelocity = nav.jumpV, Radius = radius, Height = height })
 	local envelope = agent:JumpEnvelope()
 	local world = UniversalNav.World.SurfaceLattice.new({
 		Model = map,
