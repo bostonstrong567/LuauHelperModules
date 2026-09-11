@@ -5010,7 +5010,7 @@ ui.colourSec:ColorPicker({
 -- Draws the lattice around you, green where the router can reach and red where it cannot.
 -- Everything lives on esp.heat and under one MM2Heat folder, so deleting this fenced block
 -- and the esp.heat teardown line in OnDestroy removes it completely.
-esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0 }
+esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }) }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -5045,8 +5045,12 @@ function esp.heatColour(fraction)
 end
 
 function esp.heatPiece(node)
+	local known = esp.heat.pieces[node]
+	if known ~= nil then return known ~= false and known or nil end
 	local ok, label = pcall(function() return nav.world:Piece(node) end)
-	return ok and label or nil
+	label = ok and label or nil
+	esp.heat.pieces[node] = label == nil and false or label
+	return label
 end
 
 function esp.heatTile(index)
@@ -5093,6 +5097,7 @@ function esp.heatDraw()
 	local mine = standing and esp.heatPiece(standing) or nil
 	local nodes = world:Nearby(here, range)
 	local used = 0
+	local flatSize = Vector3.new(pitch, 0.15, pitch)
 
 	-- the route we are actually walking, so the planned way through stands out
 	local plan = {}
@@ -5117,14 +5122,19 @@ function esp.heatDraw()
 		local tile = esp.heatTile(used)
 		local floor = node.Floor or node.Position
 		local head = node.Clear or pitch
-		tile.Size = Vector3.new(pitch, 0.15, pitch)
-		tile.Position = floor + Vector3.new(0, 0.12, 0)
+		local rest = floor + Vector3.new(0, 0.12, 0)
+		if tile.Size ~= flatSize then tile.Size = flatSize end
+		if tile.Position ~= rest then tile.Position = rest end
 
 		-- cost to stand here: how far, how much climbing, how exposed, how tight
 		local away = danger.flat(node.Position, here).Magnitude / math.max(range, 1)
 		local lift = math.abs(node.Position.Y - here.Y) / 30
-		local okRisk, risk = pcall(function() return world:Risk(node) end)
-		risk = okRisk and type(risk) == "number" and risk or 0
+		local risk = esp.heat.risks[node]
+		if risk == nil then
+			local okRisk, got = pcall(function() return world:Risk(node) end)
+			risk = okRisk and type(got) == "number" and got or 0
+			esp.heat.risks[node] = risk
+		end
 		local tight = head < 6 and (6 - head) / 6 or 0
 		local heat = math.clamp(away * 0.55 + lift * 0.25 + risk * 1.2 + tight * 0.3, 0, 1)
 
