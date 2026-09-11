@@ -7028,7 +7028,7 @@ function esp.heatDraw()
 
 	-- every way off this tile that is not plain walking: jumps, drops, climbs, ledges
 	for _, node in nodes do
-		if used > 1600 then break end
+		if used > (state.heatTiles or 4000) + 600 then break end
 		local okAff, list = pcall(function() return world:AffordancesAt(node) end)
 		if okAff and list then
 			for _, aff in list do
@@ -7038,7 +7038,7 @@ function esp.heatDraw()
 						local to = exit.Position or exit.Floor
 						if to then
 							used += 1
-							if used > 1600 then break end
+							if used > (state.heatTiles or 4000) + 600 then break end
 							local link = esp.heatTile(used)
 							local from = (node.Floor or node.Position) + Vector3.new(0, 0.6, 0)
 							local span = to - from
