@@ -282,7 +282,6 @@ function Affordances.signature(object)
 	return table.concat(parts, "|")
 end
 
--- Memory keys never cross games, kinds or mechanisms: a failed wall run must not doubt a climb
 -- What kind of thing this is, with no body in it: whether a ladder can be climbed at all is a fact about
 -- ladders, so it is learned once and every agent inherits it.
 function Affordances.key(object, kind, mechanism)
@@ -372,8 +371,6 @@ end
 function Affordances.trust(aff, exec)
 	local key = exec or aff.Key
 	local learned = Memory.behavioral(key)
-	-- What this body has done here outranks what bodies in general have done, but until it has tried,
-	-- the mechanism's own record stands in: a ladder known to be climbable is still worth approaching.
 	if not learned and exec then learned = Memory.behavioral(aff.Key) end
 	if not learned then return aff.Evidence.Semantic end
 	local k = Memory.known[key] or Memory.known[aff.Key]
@@ -381,7 +378,6 @@ function Affordances.trust(aff, exec)
 	return learned
 end
 
--- Plausible: worth a probe when the route needs it
 function Affordances.plausible(aff)
 	return aff.Evidence.Geometry >= 0.5 or aff.Evidence.Semantic >= 0.5
 end
@@ -441,7 +437,6 @@ function Perception.Portals.faces(part, lattice)
 	return out
 end
 
--- The world-vertical extent of a part, whichever way it is turned
 function Perception.Portals.tall(part)
 	local frame = Perception.Portals.frame(part)
 	return frame and frame.Height or 0
@@ -741,7 +736,6 @@ function HumanoidAdapter:Headroom() return self.height end
 function HumanoidAdapter:MaxDrop() return self.maxDrop end
 function HumanoidAdapter:GapDown() return self.gapDown end
 
--- The furthest a jump carries at this speed and the highest it rises, from the live numbers
 -- The apex is what the body reaches with nothing to spare, and a landing there is one the feet clip:
 -- the usable rise keeps a margin below it, so a jump the model offers is one the body still has room
 -- to finish. The reach is measured the same way, over the airtime that remains at that rise.
@@ -753,7 +747,6 @@ function HumanoidAdapter:JumpEnvelope()
 	return { MaxUp = rise, MaxFlat = flat }
 end
 
--- The platform's prior for climbing is 70% of walk speed; a measured model for the surface's key wins
 -- How fast this body climbs this thing. Only a rate this shape of body actually measured counts; a
 -- rate learned by a different shape says nothing about what this one can do.
 function HumanoidAdapter:ClimbSpeed(key)
@@ -777,7 +770,6 @@ function HumanoidAdapter:Providers()
 	return list
 end
 
--- Everything a cached transition depends on; two agents with equal signatures share results
 -- Bodies that execute a mechanism the same way share what they learn about it. Height and reach are
 -- bucketed so that a nudge to walk speed does not throw away everything this shape of body has learned.
 function HumanoidAdapter:Family()
@@ -807,7 +799,6 @@ function Roblox.ClimbExecutor.run(transition, io)
 	local verified = probe == nil
 	local into = -aff.Normal
 	local side = Vector3.new(-into.Z, 0, into.X)
-	-- Into the face while holding the chosen column, with any extra sideways push added
 	local function press(here, extra)
 		local off = math.clamp((foot - here):Dot(side), -1, 1) * 0.6
 		return (into + side * (off + (extra or 0))).Unit
@@ -819,9 +810,6 @@ function Roblox.ClimbExecutor.run(transition, io)
 	local shift = 0
 	local highest, highestAt = -math.huge, 0
 	local hopAt = nil
-	-- A failed climb ends on the ground, never hanging. Near the crest the body hops forward toward the
-	-- exit, which is how a ladder is left, and counts as done if it lands there; lower down it backs off
-	-- the face until it lands
 	local function abort()
 		local at = io.Root()
 		local nearTop = climbFrom ~= nil and at ~= nil and at.Position.Y >= crest.Y - 2
@@ -903,8 +891,6 @@ function Roblox.ClimbExecutor.run(transition, io)
 				Roblox.ClimbExecutor.Last = { Status = "done", Phase = "dismount", Rise = crest.Y - climbFrom, Verified = true, Speed = climbed > 0.2 and (crest.Y - climbFrom) / climbed or nil }
 				return Roblox.ClimbExecutor.Last
 			end
-			-- Nothing gained and not on the surface: the attach never took, so the remaining seconds
-			-- would buy nothing. Give the time back to the planner instead of standing them out.
 			if held > 0.8 and hum:GetState() ~= Enum.HumanoidStateType.Climbing and (here.Y - climbFrom) < 0.5 then
 				return abort()
 			end
@@ -970,9 +956,6 @@ function Roblox.JumpExecutor.run(transition, io)
 		local speed = math.max(Vector3.new(vel.X, 0, vel.Z):Dot(dir), 0)
 		local dy = landing.Y - floorHere(root)
 		if phase == "approach" then
-			-- The speed the planner validated this arc at, not whatever the humanoid happened to hold
-			-- when the leg began. Those differ whenever the caller has not yet set the body to the
-			-- agent's speed, and the executor would then fail an approach the planner had approved.
 			local top = math.max(wasSpeed, planned and planned.HorizontalSpeed or 0)
 			local t = airtime(v, g, dy)
 			local need = t and (flat + Roblox.JumpExecutor.Edge) / t or math.huge
@@ -984,9 +967,6 @@ function Roblox.JumpExecutor.run(transition, io)
 			if flat <= 1.5 and math.abs(dy) < 1.5 then
 				return finish("done", { Speed = speed })
 			elseif need <= top then
-				-- The speed the arc was planned at is the speed the body runs at, set on the humanoid
-				-- rather than scaled into the move vector: a caller that sets its own walk speed every
-				-- frame would otherwise fly a different arc from the one the model validated
 				local scale = math.clamp(need / top, 0.35, 1)
 				hum.WalkSpeed = math.max(need, top * 0.35)
 				if need < top * 0.35 and runway then
@@ -1073,9 +1053,6 @@ function Steering.Heading(from, want, ctx, memo)
 		memo.Bend, memo.Side = nil, nil
 		return want, straight, nil
 	end
-	-- A bend is a decision, and a decision re-made every frame is a stutter. Once taken it is followed
-	-- for a quarter second unless the body has actually run out of room along it, which is what stops
-	-- two nearly equal openings swapping the heading left and right down a corridor.
 	if memo.Bend and memo.Bend:Dot(want) > Steering.Forward then
 		local held = Steering.Room(from, memo.Bend, ctx, look)
 		local fresh = memo.At and (os.clock() - memo.At) < Steering.Commit
@@ -1099,11 +1076,6 @@ function Steering.Heading(from, want, ctx, memo)
 			end
 		end
 	end
-	-- Pressed against a wall there is no heading with a full look-ahead of room, and the widest opening
-	-- may be barely more than a body's width. Insisting on a clear stud of improvement there returns
-	-- nothing and the caller leans on the wall at full throttle, which is the freeze this exists to
-	-- prevent. Any lane that beats standing still is taken: the body keeps moving and re-decides next
-	-- frame, which is how it works its way out of a corner instead of pushing into it.
 	if best and bestRoom > math.max(straight, Steering.Escape) then
 		memo.Bend, memo.At = best, os.clock()
 		return best, bestRoom, blocker
@@ -1135,11 +1107,6 @@ function Traversal.Ground.Between(a, b, ctx)
 	local body = Vector3.new(size.X, size.Y - step, size.Z)
 	local centre = Vector3.new(0, (step + size.Y) / 2 - lift, 0)
 	if geo:Blockcast(a + centre, b + centre, body) then return nil end
-	-- Floor is checked along the whole run, not at one point in the middle. The body sweep above sees
-	-- obstacles, and air is not an obstacle, so a hole between the two ends passes it; a single
-	-- midpoint ray then only has to find floor at one spot to call the walk supported. Between two
-	-- neighbouring lattice cells that is nearly the same thing, but a direct walk has no length
-	-- limit, so the number of samples follows the distance travelled.
 	local flat = flatBetween(a, b)
 	local spacing = math.max(agent:Size().Z, 1)
 	local k = math.max(math.ceil(flat / spacing), math.ceil(rise / step), 2)
@@ -1192,8 +1159,6 @@ end
 
 Traversal.Jump = { Name = "Jump", Setup = 0.3 }
 
--- A ballistic arc at the agent's speed and jump under the world's gravity, swept as the body; what it
--- can reach is the agent's own envelope, never a fixed number
 -- The arc the executor flies: airborne until the feet come down to the landing's height, at the run
 -- speed that covers the flat distance in exactly that time; the body is swept along it in four pieces
 function Traversal.Jump.Between(a, b, ctx)
@@ -1205,9 +1170,6 @@ function Traversal.Jump.Between(a, b, ctx)
 	local speed, g, v = agent:Speed(), agent:Gravity(), agent:JumpVelocity()
 	local t = airtime(v, g, dy)
 	if not t then return nil end
-	-- The body must clear the far lip, not merely reach it, so the speed the model asks for is the one
-	-- the executor will actually run at; a jump the executor could only make by exceeding walk speed
-	-- is refused here instead of being offered and then missed by the margin it could not cover
 	local need = (flat + Roblox.JumpExecutor.Edge) / t
 	if need > speed then return nil end
 	local dir = Vector3.new(b.X - a.X, 0, b.Z - a.Z) / flat
@@ -1221,10 +1183,6 @@ function Traversal.Jump.Between(a, b, ctx)
 		if geo:Blockcast(last, point, body) then return nil end
 		last = point
 	end
-	-- The motion the arc was validated with travels with the move, so the executor flies the jump the
-	-- planner actually approved rather than re-deriving it from whatever walk speed the body happens
-	-- to be set to at the time. Those two disagreed whenever the humanoid had not yet been set to the
-	-- agent's speed, and the jump then failed for a reason the planner had already ruled out.
 	return "Jump", t + Traversal.Jump.Setup, (b - a).Magnitude, {
 		HorizontalSpeed = need,
 		JumpVelocity = v,
@@ -1311,8 +1269,6 @@ function Traversal.Climb.Generate(state, ctx, out)
 				local climb = aff.Height / rate
 				for _, exit in aff.Exits do
 					local step = flatBetween(aff.Top, exit.Position) / ctx.Agent:Speed()
-					-- The rate this price was worked out at travels with the move, so a cached climb
-					-- can be re-priced once the body has measured how fast that surface really climbs
 					table.insert(out, Core.transition(state, exit, "Climb", walk + climb + step + 1, aff.Height + flatBetween(state.Position, exit.Position), 0, { Affordance = aff, Exit = exit, Foot = foot, Rate = rate, Fixed = walk + step + 1 }))
 				end
 			end
@@ -1484,7 +1440,6 @@ function SurfaceLattice:AffordancesAt(n)
 	return self.byEntry[n] or none
 end
 
--- The lattice point nearest a position on the same level
 -- The node in exactly this cell near this height, or nothing
 function SurfaceLattice:NodeInCell(pos, tolerance)
 	local list = self:list(self:cellOf(pos))
@@ -1514,7 +1469,6 @@ function SurfaceLattice:NodeAt(pos, tolerance)
 	return best
 end
 
--- Every point within a flat radius of a position, any level
 function SurfaceLattice:Nearby(pos, radius)
 	local ix, iz = self:cellOf(pos)
 	local cells = math.ceil(radius / self.cell)
@@ -1532,7 +1486,6 @@ function SurfaceLattice:Nearby(pos, radius)
 	return out
 end
 
--- Points in exactly the ring of cells around a point, every level, within a flat limit
 function SurfaceLattice:Neighbours(n, ring, flatLimit)
 	local out = {}
 	local limit = flatLimit or math.huge
@@ -1620,7 +1573,6 @@ function SurfaceLattice:findPieces()
 			end
 		end
 	end
-	-- Every affordance joins all of its entries to all of its exits, whichever end was reached first
 	for _, aff in self.affordances do
 		for _, entry in aff.Entries do
 			if parent[entry] == nil then parent[entry] = entry end
@@ -1715,9 +1667,6 @@ end
 -- Connectors: the moves that join a free position to the world, validated exactly like any other move.
 -- Nearest points first; walks within a short radius are enough when any exist, and only when none do
 -- are drops and jumps out to the full radius tried, so a query on open floor costs a handful of rays.
--- A place nothing in the world joins to. Probing every provider against every node in jump range is
--- the connector's dearest work, and a goal that failed it once fails it again while the world stands
--- still, so the answer is remembered per cell and thrown away whenever the world changes.
 function Navigator:looseKey(pos)
 	return string.format("%d,%d,%d", math.floor(pos.X / 4), math.floor(pos.Y / 4), math.floor(pos.Z / 4))
 end
@@ -1770,9 +1719,6 @@ function Navigator:expand(state, ctx)
 	local cache = ctx.Cache
 	local list = cache:get(state)
 	if list then
-		-- Feasibility is cached, but price is not allowed to go stale: a climb whose surface has since
-		-- been measured is re-priced at the rate we now know, so learning how fast something climbs
-		-- changes which route is fastest instead of only changing whether it is possible.
 		for _, t in list do
 			local d = t.Data
 			if d and d.Rate and d.Affordance then
@@ -1787,8 +1733,6 @@ function Navigator:expand(state, ctx)
 	end
 	list = {}
 	for _, provider in ctx.Providers do provider.Generate(state, ctx, list) end
-	-- The world stores the room a surface has, not whether one body fits there. A surface too low for
-	-- this agent is dropped here, so the same lattice serves a crawler and something twice its height.
 	local room = ctx.Agent:Headroom()
 	for i = #list, 1, -1 do
 		local clear = list[i].To.Clear
@@ -1798,10 +1742,6 @@ function Navigator:expand(state, ctx)
 	return list
 end
 
--- The transitions around a position, generated before any route asks for them: nearest first,
--- spreading outward, a slice of time per frame, so a route through that ground later runs warm.
--- query: Agent, Position, Nodes (new expansions before returning), Budget (seconds per frame),
--- Active (function -> bool). Returns the number of states expanded.
 -- Somewhere the agent can actually get to, and get back from. Reachable ground is walked outward from
 -- where it stands through the same transitions a route would use, so every answer is a place a plan
 -- exists for, not a spot a ray happened to find; a pit floor with no way up is never offered, because
@@ -2014,8 +1954,6 @@ function Navigator:DirectTransition(query)
 	return nil
 end
 
--- A failed walk is a wall: refused for 30 s, then for good after a second failure. A failed jump is a
--- miss the body may well make next time: refused for 30 s more each failure, up to two minutes, never for good
 -- The move the body actually failed earns a lasting refusal; its neighbours, distrusted because they
 -- end where it did, earn only a temporary one. A wall is a hint about a place, not proof that every
 -- move into it is impassable, and a permanent ban on a neighbour never tried would close ground off
@@ -2065,8 +2003,6 @@ function Navigator:Report(transition, outcome, measured)
 				if other.Data and other.Data.Affordance == aff then self:distrustEdge(from, other.To, other.Kind, true) end
 			end
 		end
-		-- Drops belong here too: the body meets the same lip from several nearby cells, so distrusting
-		-- only the edge it happened to take leaves the same failure waiting one step to the side
 		if transition.Kind == "Walk" or transition.Kind == "Jump" or transition.Kind == "Drop" then
 			local dir = to.Position - from.Position
 			dir = Vector3.new(dir.X, 0, dir.Z)
@@ -2079,9 +2015,6 @@ function Navigator:Report(transition, outcome, measured)
 					if other.Kind == transition.Kind and other.To ~= to and d.Magnitude > 0.01 and d.Unit:Dot(dir) > 0.7 then self:distrustEdge(from, other.To, other.Kind, true) end
 				end
 			end
-			-- What stopped the body is a place, not one edge: a wall a step to either side stops the
-			-- neighbours too, so every cached move that ends where this one did is distrusted with it.
-			-- Without this the router steps sideways and walks into the same wall from the next node.
 			for _, n in self.world:Nearby(from.Position, Steering.Look) do
 				local near = self.cache:get(n)
 				if near then
@@ -2097,18 +2030,12 @@ function Navigator:Report(transition, outcome, measured)
 	end
 	local aff = transition.Data and transition.Data.Affordance
 	if not aff then return nil end
-	-- An outcome says two different things. That the mechanism works at all is about the object, and
-	-- every body gets to know it. How fast it went, and whether this body managed it, belongs to the
-	-- pairing, so a measured rate learned by one shape never prices another shape's route.
 	local exec = self:execKey(aff)
 	if ok then
 		self.cold[self:coldKey(aff)] = nil
 		Memory.report(aff.Key, true)
 		return exec and Memory.report(exec, true, measured) or Memory.report(aff.Key, true, measured)
 	end
-	-- A surface the body spent its whole attempt on without rising is not one that failed by chance:
-	-- it could not be got onto at all, and trying it again this minute would spend the same seconds
-	-- for the same nothing. It is refused outright for a while, whatever its accumulated trust says.
 	if type(outcome) == "table" and (outcome.Rise or 1) <= 0.2 and (outcome.Held or 0) >= 1 then
 		self.cold[self:coldKey(aff)] = os.clock() + 60
 	end

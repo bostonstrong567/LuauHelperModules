@@ -15,6 +15,7 @@ local MM2_GAME_ID = 66654135
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
+------------------------------------------------------------------------------------------- Bootstrap
 -- The core notification hook registers late on a cold join, so keep trying for a few seconds
 local function coreNotify(title, text)
 	for _ = 1, 10 do
@@ -140,6 +141,7 @@ local state = {
 	showFov = true,
 }
 
+----------------------------------------------------------------------------------------------- State
 -- Restored saved values fire callbacks at build time, so only a real flip gets a status line
 local function flip(key, on)
 	local was = state[key]
@@ -239,6 +241,7 @@ local function fmtDuration(sec)
 	return string.format("%dm %ds", m, math.floor(sec % 60))
 end
 
+----------------------------------------------------------------------------------------------- Round
 -- Round state, all read from the game's own module and workspace
 local function roleData()
 	return Round.PlayerData
@@ -309,6 +312,7 @@ local function nameFor(role)
 	return nil
 end
 
+----------------------------------------------------------------------------------------------- World
 local function myChar()
 	return player.Character
 end
@@ -464,6 +468,7 @@ local function aliveTargets()
 	return out
 end
 
+---------------------------------------------------------------------------------------------- Status
 local win = Ember.new({
 	Name = "rbxlolhub",
 	Title = "RBX.lol Hub",
@@ -528,6 +533,7 @@ end
 
 local myAttacks = {}
 
+----------------------------------------------------------------------------------------------- Melee
 local function claimAttack(name, weapon)
 	myAttacks[name] = { at = os.clock(), weapon = weapon }
 end
@@ -634,6 +640,7 @@ function danger.fallGuard(now)
 	say("Pulled back onto the map", "life-buoy", "muted")
 end
 
+------------------------------------------------------------------------------------------------- Aim
 local function excludeMe()
 	local rp = RaycastParams.new()
 	rp.FilterType = Enum.RaycastFilterType.Exclude
@@ -807,8 +814,6 @@ local function clearAim(origin, entry)
 	if seen and now - seen.at > 0.04 and now - seen.at < 0.5 then
 		v = (root.Position - seen.pos) / (now - seen.at)
 		v = Vector3.new(v.X, 0, v.Z)
-		-- A body moving faster than a player can is one whose next moment is not predictable from
-		-- this one, so the further past a walk it is, the less of its motion is worth extrapolating
 		if v.Magnitude > 20 then v = v.Unit * (20 + (math.min(v.Magnitude, 60) - 20) * 0.25) end
 	end
 	if not seen or now - seen.at > 0.04 then hold.seen[root] = { pos = root.Position, at = now } end
@@ -820,8 +825,6 @@ local function clearAim(origin, entry)
 	if head then table.insert(points, 2, head.Position + lead) end
 	local rp = aimParams()
 	local blocker
-	-- The game's own client sends the point its ray struck, never a point in mid-air, so a ray that
-	-- hits nothing is not an aim: the server re-traces from the muzzle and finds nothing there either
 	local function lands(from, ray)
 		local hit = Workspace:Raycast(from, ray * 1.5, rp)
 		if not hit then return false end
@@ -920,10 +923,6 @@ local function sniperTick(now)
 	if now - lastShot < SHOT_GAP then return end
 
 	local point = clearAim(origin.WorldCFrame.Position, target)
-	-- Beyond about forty studs the server has not once accepted a shot the client thought was clean,
-	-- and every one costs the reload, so a far target is closed on rather than fired at
-	-- Too far and the server refuses it; close enough for his knife and the shot is beside the point,
-	-- because losing that exchange costs the round. Both ends of the band are left to the duel.
 	local range = (target.root.Position - origin.WorldCFrame.Position).Magnitude
 	if point and (range > sniper.reach or range < KNIFE_REACH) then point = nil end
 	if point then
@@ -1004,6 +1003,7 @@ end
 
 local fovGui, fovRing = nil, nil
 
+------------------------------------------------------------------------------------------ Silent aim
 local function fovWanted()
 	return state.silentAim and state.showFov and not state.aimInfinite
 end
@@ -1088,6 +1088,7 @@ local function hookSilentAim()
 	end)
 end
 
+--------------------------------------------------------------------------------------------- Pickups
 -- The dropped gun is a GunDrop-tagged part with a TouchInterest; touching it is the pickup
 local function droppedGuns()
 	local out = {}
@@ -1150,6 +1151,7 @@ local function coinParts()
 	return out
 end
 
+---------------------------------------------------------------------------------------------- Threat
 -- The murderer we keep away from: none while we hold a weapon, and before the round timer starts
 -- he has no knife yet, so he only counts inside 25 studs then, and for 4 s after he was that close
 function danger.root()
@@ -1157,8 +1159,6 @@ function danger.root()
 		danger.rootWhy = "off"
 		return nil
 	end
-	-- A gun does not make his knife harmless. Beyond its reach we hunt him; inside it he wins the
-	-- exchange every time, so he counts as a threat again and the planner backs out of that range.
 	local armed = findTool("Gun") ~= nil or findTool("Knife") ~= nil
 	if armed and findTool("Knife") then
 		danger.rootWhy = "armed"
@@ -1196,7 +1196,6 @@ function danger.root()
 	if danger.lastThreat and os.clock() - danger.lastThreatAt < 1 and danger.lastThreat.Parent then return danger.lastThreat end
 	return nil
 end
-
 
 -- The murderer's root whether or not he counts as a threat yet, for choosing where to go
 function danger.shadow()
@@ -1298,7 +1297,6 @@ function danger.pathGap(from, to, threat)
 	return gap
 end
 
--- With the murderer about, a coin near them or past them costs far more than its distance, so the far side wins
 -- Near enough to be stabbed or thrown at, whatever the route says: on our level and inside the given straight-line distance
 function danger.closeBy(from, threat, within)
 	local flat = Vector3.new(threat.Position.X - from.X, 0, threat.Position.Z - from.Z).Magnitude
@@ -1322,9 +1320,6 @@ local function nearestCoin(from, now)
 			for _, other in parts do
 				if other ~= part and (other.Position - part.Position).Magnitude < 20 then nearby += 1 end
 			end
-			-- Distance decides, and a cluster only breaks a tie. Dividing the distance by the cluster
-			-- size let a coin ninety studs away in a pile beat one thirty studs away on its own, so
-			-- the body crossed the map past coins it was standing on.
 			local score = d - math.min(nearby, 6) * 4
 			if danger.lethal(part.Position, 12) then score = nil end
 			if score and threat then
@@ -1394,6 +1389,7 @@ end
 local coinRun = nil
 local borrowed = nil
 
+-------------------------------------------------------------------------------------------- Movement
 local function borrowMovement()
 	local hum = myHumanoid()
 	if not hum or borrowed then return hum end
@@ -1524,14 +1520,10 @@ local function drive(run, root, hum, target, speed)
 	local now = os.clock()
 	local dt = math.min(now - (run.driveAt or now), 0.1)
 	run.driveAt = now
-	-- The turn rate applies to every heading change, a reversal most of all: the old rule let anything
-	-- past a right angle snap round in one frame, which is the jerk you see when a plan changes
 	local have = run.moveDir
 	if have and have.Magnitude > 0.5 then
 		have = have.Unit
 		local angle = math.acos(math.clamp(have:Dot(want), -1, 1))
-		-- Fast enough that a full reversal finishes inside the distance the body looks ahead, which is
-		-- what stops it being committed to a wall before it can turn away from one
 		local most = math.rad(540) * dt * math.clamp(speed / 18, 1, 1.6)
 		if angle > most then
 			local sign = have:Cross(want).Y >= 0 and 1 or -1
@@ -1539,12 +1531,6 @@ local function drive(run, root, hum, target, speed)
 			want = CFrame.Angles(0, sign * most, 0) * have
 		end
 	end
-	-- Turning from one open lane to another sweeps the heading through whatever lies between them, and
-	-- at this rate that is a fifth of a second spent walking into it. The heading actually sent is
-	-- checked with the same swept body the route was planned with. A blocked one is not taken, and it
-	-- is not answered by keeping the previous heading either: the previous heading is what put the
-	-- body against the wall, so holding it just leans on the wall at full throttle. We bend to the
-	-- nearest open lane instead, and only when nothing at all is open does the body stop pushing.
 	if not danger.roomAhead(here, want, 3) then
 		run.bendMemo = run.bendMemo or {}
 		local open = danger.bendAround(here, want, run.bendMemo)
@@ -1553,9 +1539,6 @@ local function drive(run, root, hum, target, speed)
 		elseif run.moveDir and danger.roomAhead(here, run.moveDir, 3) then
 			want = run.moveDir
 		else
-			-- Sealed in on every heading the fan tried. Standing here is the one thing that cannot
-			-- help, so the body hops: a lip it was pressed against is cleared, and if it was not a
-			-- lip the next frame steers again from wherever the hop put it.
 			jumpNow()
 		end
 	end
@@ -1595,14 +1578,13 @@ function danger.threatFrom(here, threat)
 	return threat.Position
 end
 
--- The brain's log, written from anywhere that runs under it
 function danger.log(text)
 	danger.brainLog = danger.brainLog or {}
 	table.insert(danger.brainLog, string.format("%.1f %s", os.clock() - (danger.brainStart or 0), text))
 	if #danger.brainLog > 24 then table.remove(danger.brainLog, 1) end
 end
 
--- Walks one leg; returns arrived, retarget, stuck or stopped
+---------------------------------------------------------------------------------------------- Walker
 local function travel(run, points, hum)
 	local fix = { level = 0, stalled = 0, progress = 0 }
 	local last = #points
@@ -1694,17 +1676,12 @@ local function travel(run, points, hum)
 			local flat = Vector3.new(target.X - here.X, 0, target.Z - here.Z).Magnitude
 			local dy = target.Y - here.Y
 			local dt = RunService.Heartbeat:Wait()
-			-- How near counts as arrived has to grow with the speed: a body covering a stud per frame
-			-- steps straight over a one-stud target and never registers reaching it, which at sixty
-			-- studs a second turns every waypoint into a stall
 			local step = math.max(1, speed * dt * 1.5)
 			local reach = final and step
 				or (i < last and points[i + 1].Action == Enum.PathWaypointAction.Jump) and math.max(1.5, step)
 				or math.max(3, speed * dt * 1.2)
 			if flat < reach and dy < 1.5 and dy > -7 then break end
 			if not final and flat < 1.5 and dy < -6 then break end
-			-- Standing under a waypoint we cannot rise to is not walking toward it, and driving at a
-			-- target directly overhead gives no heading at all, so the leg is finished either way
 			if flat < 3 and dy >= 1.5 then
 				fix.overhead = (fix.overhead or 0) + dt
 				if fix.overhead > 0.35 then
@@ -1770,14 +1747,9 @@ local function travel(run, points, hum)
 					end
 				end
 			end
-			-- Boxed in for this frame. The one direction certain to be open is the one we arrived from,
-			-- so the body reverses out of the pocket instead of standing in it while the stall timer
-			-- runs; a leg that keeps needing this still replans, but it never stops moving to do it.
 			if goal then
 				drive(run, root, hum, goal, speed)
 			else
-				-- Backing out of a pocket still has to be somewhere the body fits: the way we came is
-				-- checked like any other heading, and a trail point is used when it is not open
 				local back = lastPos and (root.Position - lastPos) or Vector3.zero
 				back = Vector3.new(back.X, 0, back.Z)
 				local out = back.Magnitude > 0.05 and -back.Unit or (run.moveDir and -run.moveDir) or -root.CFrame.LookVector
@@ -1801,9 +1773,6 @@ local function travel(run, points, hum)
 			if hum:GetState() == Enum.HumanoidStateType.Climbing then
 				moved = (lastPos and root.Position.Y - lastPos.Y > 0.05) and speed * dt or 0
 			end
-			-- Thrashing inside a few studs is not progress however fast the body moves: a wall being
-			-- climbed at and fallen off keeps the speed up while the leg goes nowhere, so the pen is
-			-- measured as the box the body has stayed inside rather than the ground it has covered
 			fix.pen = fix.pen or here
 			if (here - fix.pen).Magnitude > 6 then
 				fix.pen, fix.penned = here, 0
@@ -1825,8 +1794,6 @@ local function travel(run, points, hum)
 					if #trail > 30 then table.remove(trail, 1) end
 				end
 			end
-			-- One hard rule above every other: a leg that has not gained ground on its waypoint for
-			-- three seconds is over. Whatever the reason, standing there is never the answer.
 			if (fix.penned or 0) > 1.5 then
 				if not danger.legFailed(run, wp, nil, "penned") then danger.wedged(root.Position) end
 				run.replans = (run.replans or 0) + 1
@@ -1872,6 +1839,7 @@ end
 -- The map as a UniversalNav surface lattice, our humanoid as its agent, and routes as legs the walker understands
 local nav = { ready = false, count = 0, map = nil, calls = 0, used = 0, stats = {}, world = nil, navigator = nil, agent = nil }
 
+------------------------------------------------------------------------------------------ Navigation
 function nav.reset()
 	if nav.world then nav.world:Abort() end
 	nav.world, nav.navigator, nav.map, nav.ready, nav.count = nil, nil, nil, false, 0
@@ -1977,10 +1945,6 @@ function danger.straight(here, floorPoint)
 	return UniversalNav.Traversal.Ground.Between(here - Vector3.new(0, 3 - lift, 0), floorPoint + Vector3.new(0, lift, 0), ctx) ~= nil
 end
 
--- The heading for this frame, chosen by the movement system with the body it plans with: the wanted
--- way when the body fits along it, else the smallest bend that has both room and footing, else
--- nothing, which the walker reads as boxed in. A knee-high lip alone, which the body clears by
--- stepping, asks for a hop instead of a bend.
 -- Whether the body fits along a heading for a given distance, by the movement system's own body sweep
 function danger.roomAhead(from, dir, want)
 	if not nav.ready then return true end
@@ -2039,7 +2003,6 @@ function nav.blocked(s)
 	return (danger.traps[danger.goalKey(s.Position)] or 0) > os.clock()
 end
 
--- Whether the movement system remembers this spot killing us on this map
 function danger.lethal(pos, within)
 	return nav.navigator ~= nil and nav.navigator:Lethal(pos, within, 1)
 end
@@ -2124,9 +2087,6 @@ function danger.route(threat)
 		for i = 2, #pts do len += (pts[i].Position - pts[i - 1].Position).Magnitude end
 		if #pts >= 2 then danger.approach = pts[math.max(#pts - 2, 1)].Position end
 	elseif (danger.routeDud or 0) < os.clock() then
-		-- The navmesh could not join him to us, so the lattice is asked instead; when that fails too
-		-- it is left alone for a couple of seconds, since asking again every frame spent 20 ms on the
-		-- same exhausted search while he stood on a floor nothing reaches
 		local legs = nav.route(threat.Position, root.Position, true)
 		if legs then
 			len = 0
@@ -2188,9 +2148,6 @@ end
 
 local function newRun(target, valid, kind)
 	local run = { active = true, kind = kind, target = target, targetDist = math.huge, retarget = false, trail = {}, moveDir = nil, valid = valid }
-	-- This is what actually walks the body, every frame, from a heading the loop stores. It must refuse
-	-- to drive the moment the run stops owning the character: without that check a stopped run keeps
-	-- re-sending its last heading and the body walks on after the switch is already off.
 	run.stepConn = RunService.RenderStepped:Connect(function()
 		if run.active and coinRun == run and run.moveDir and danger.canMove() then player:Move(run.moveDir, false) end
 	end)
@@ -2198,6 +2155,7 @@ local function newRun(target, valid, kind)
 	return run
 end
 
+------------------------------------------------------------------------------------------- Coin runs
 local function coinLoop(run)
 	local hum = borrowMovement()
 	if not hum then return "no character" end
@@ -2213,8 +2171,6 @@ local function coinLoop(run)
 		local root = myRoot()
 		if not root then return "no character" end
 
-		-- No coin in reach right now, so walk on toward open ground while more spawn rather than
-		-- standing on the spot: the ones that appear will be somewhere new, and we are already going
 		local target, dist = nearestCoin(root.Position, now)
 		if not target then
 			run.idle = true
@@ -2229,8 +2185,6 @@ local function coinLoop(run)
 			continue
 		end
 
-		-- The coin being walked to is kept unless a new one is well nearer, so a crowd of coins does
-		-- not make the body change its mind every pass and cross its own path
 		if run.target and coinValid(run.target) and (coin.skipped[run.target] or 0) < now then
 			local heldDist = (run.target.Position - root.Position).Magnitude
 			if heldDist <= (dist or math.huge) * 1.6 then target, dist = run.target, heldDist end
@@ -2371,7 +2325,6 @@ local function grabDroppedGun()
 	return true, string.format("%.0f studs away", dist)
 end
 
--- Walks after a moving player with the coin walker until inside reach; re-routes when they move
 -- Legs toward a player: to them, else to floor points part of the way, so a target in a room we
 -- cannot enter still draws us to its door
 function sniper.legsToward(root, who, target)
@@ -2447,6 +2400,7 @@ local function pursue(who, reach)
 	return reached
 end
 
+------------------------------------------------------------------------------------------------ Flee
 -- The freest direction around us that does not lead at him: the only heading ever taken without a route
 function danger.openDir(root, threat)
 	local here = root.Position
@@ -2524,7 +2478,6 @@ function danger.breakout(root, threat)
 	return { { Position = goal, Action = Enum.PathWaypointAction.Walk, Label = "" } }, goal
 end
 
--- The best way out from here: a clean route, else the route that keeps the most distance, else straight away
 function danger.goalKey(goal)
 	return string.format("%d,%d,%d", math.floor(goal.X / 8), math.floor(goal.Y / 8), math.floor(goal.Z / 8))
 end
@@ -2586,15 +2539,10 @@ end
 function danger.fleeLegs(root, threat)
 	local now = os.clock()
 	local here = root.Position
-	-- A dash only when he is genuinely on top of us: further out there is time for a real route, and a
-	-- route that keeps opening the gap beats a forty-stud lunge that ends with him still behind
 	if danger.closeBy(here, threat, 18) and danger.gap(here, threat) < 18 then
 		local legsOut, goalOut = danger.breakout(root, threat)
 		if legsOut then return legsOut, goalOut end
 	end
-	-- Keeping the goal is only worth it while it is still the right goal. He moves, so the kept one is
-	-- dropped the moment it stops opening the gap or he gets between us and it: a route chosen four
-	-- seconds ago can run straight past where he is standing now.
 	local sticky = danger.fleeGoal and now - danger.fleeGoalAt < 6 and (danger.fleeGoal - here).Magnitude > 8 and danger.fleeGoal or nil
 	if sticky then
 		local keeps = danger.gap(sticky, threat) > danger.gap(here, threat)
@@ -2605,7 +2553,6 @@ function danger.fleeLegs(root, threat)
 	end
 	local mine = (here - threat.Position).Magnitude
 	local heading = danger.heading(threat)
-	-- The best escape and the seven behind it, so a route he can cut does not end the search
 	local best = {}
 	nav.navigator:Reachable({
 		Agent = nav.agent,
@@ -2617,8 +2564,6 @@ function danger.fleeLegs(root, threat)
 			local p = state.Position
 			if (danger.badGoals[danger.goalKey(p)] or 0) > now then return nil end
 			if danger.lethal(p, 12) then return nil end
-			-- A short sideways step that breaks his line is a real escape and often the only one there
-			-- is; the distance term still prefers a long run when one exists
 			local run = (p - here).Magnitude
 			if run < 10 then return nil end
 			local his = danger.gap(p, threat)
@@ -2721,9 +2666,6 @@ function danger.roamLegs(root, threatRoot)
 	local eyes = excludeMe()
 	if threatRoot then eyes.FilterDescendantsInstances = { myChar(), threatRoot.Parent } end
 	local mine = threatRoot and (here - threatRoot.Position).Magnitude or math.huge
-	-- One walk of the reachable ground, keeping the best handful rather than only the winner: the top
-	-- scoring place often has a route the murderer can cut, and with a couple of hundred to choose
-	-- from the next one usually does not, so several are tried before the planner reports nothing.
 	local function shortlist(avoid)
 		local best = {}
 		nav.navigator:Reachable({
@@ -2779,7 +2721,6 @@ function danger.roamLegs(root, threatRoot)
 	return nil
 end
 
--- The floor spot on the map farthest from the murderer, for the teleport flee
 -- Somewhere far from him that the walker can carry on from. A downward ray finds any surface at all --
 -- a roof, a prop outside the walls, terrain under the floor -- and landing on one of those is how you
 -- end up off the map with nothing to route from. So candidates are taken from the navigation lattice
@@ -2798,7 +2739,6 @@ function danger.farSpot(root, threat)
 			local x, z = centre.X + hx * ix / 2, centre.Z + hz * iz / 2
 			local floor = danger.floorAt(x, here.Y + 8, z) or danger.floorAt(x, centre.Y + box.size.Y / 2 - 2, z)
 			if floor then
-				-- The ray only says where to look; the lattice says whether anyone can stand there
 				for _, n in nav.world:Nearby(floor + Vector3.new(0, nav.agent:Lift(), 0), 12) do
 					local at = n.Floor or (n.Position - Vector3.new(0, nav.agent:Lift(), 0))
 					local fromUs = (Vector3.new(at.X, 0, at.Z) - Vector3.new(here.X, 0, here.Z)).Magnitude
@@ -2847,6 +2787,7 @@ function danger.ledgeOut(root, threat)
 	return nil
 end
 
+------------------------------------------------------------------------------------- Survive planner
 -- Survive planner: one loop picks flee, coin or roam for each leg from the same facts, and never halts in between
 function danger.brain()
 	danger.brainOn = true
@@ -2858,8 +2799,6 @@ function danger.brain()
 	stopCoinRun()
 	while coinRun do RunService.Heartbeat:Wait() end
 	local run = newRun(nil, function() return true end, "survive")
-	-- The flee goal deliberately survives a restart: the planner stops and starts many times during one
-	-- chase, and wiping it each time is what made every escape a fresh ten-stud dash instead of a run
 	danger.goalNow, danger.modeNow = nil, nil
 	local hum = borrowMovement()
 	if not hum then
@@ -2916,9 +2855,6 @@ function danger.brain()
 			if not legitOn("Running as innocent") and now - (danger.hopAt or 0) > 2 then
 				local spot = danger.farSpot(root, threat)
 				danger.hopAt = now
-				-- The destination has to be somewhere a route continues from, both ways: legs from it
-				-- prove the walker can leave, and a landing barely above its own floor proves it is
-				-- standing on that floor rather than dropping past it.
 				if spot and legsTo(spot + Vector3.new(0, 2, 0), root.Position) then
 					local was = root.CFrame
 					root.CFrame = CFrame.new(spot + Vector3.new(0, 3, 0)) * root.CFrame.Rotation
@@ -2927,8 +2863,6 @@ function danger.brain()
 					local landed = danger.floorAt(root.Position.X, root.Position.Y + 2, root.Position.Z)
 					local here2 = getMap()
 					if not landed or root.Position.Y - landed.Y > 8 or (here2 and not danger.inBounds(root.Position, boundsOf(here2))) then
-						-- Went somewhere with no ground under it. Put him back and run on foot instead
-						-- of leaving him falling out of the world.
 						root.CFrame = was
 						root.AssemblyLinearVelocity = Vector3.zero
 						note("teleport refused, no floor")
@@ -2963,8 +2897,6 @@ function danger.brain()
 		end
 		if not legs and not fled and state.autoCoin and not coin.bagFull then
 			local target, dist = nearestCoin(root.Position, now)
-			-- The coin is kept only while we are actually walking to it and it is still the nearest
-			-- thing worth having: a target held through a gunfight fifty studs away is not a plan
 			local held = coin.held
 			if held and coinValid(held) and (coin.skipped[held] or 0) < now and (coin.tries or 0) < 4
 				and now - (coin.heldAt or 0) < 8 then
@@ -2990,8 +2922,6 @@ function danger.brain()
 			end
 		end
 		local hunter = not danger.surviving() or (state.autoKillMurderer and findTool("Gun") ~= nil)
-		-- A target nothing routes to is left alone for a few seconds: without that the planner spent a
-		-- full search on each of four part-way points every loop, all of them failing the same way
 		if not legs and hunter then
 			local hunt = legalTargets()[1]
 			if hunt and (sniper.noPath[hunt.player] or 0) < now then
@@ -3012,8 +2942,6 @@ function danger.brain()
 				note("hunt none, targets " .. #aliveTargets())
 			end
 		end
-		-- Roam walks the reachable ground and routes up to eight places; when even that finds nothing
-		-- the answer will not change in the next few frames, so it is not asked again immediately
 		if not legs and (danger.roamDud or 0) < now then
 			mode = "roam"
 			legs, goal = danger.roamLegs(root, threat or danger.shadow())
@@ -3041,14 +2969,8 @@ function danger.brain()
 			end
 			if legs then mode = "open" end
 		end
-		-- Nothing routed this instant. That is a reason to keep walking while the next answer is
-		-- worked out, never a reason to stand: the body takes the openest lane it can see and the
-		-- loop comes straight back round, so the planner thinks with the legs already moving.
 		if not legs then
 			note("no legs gap=" .. tostring(math.floor(gap ~= math.huge and gap or -1)))
-			-- Setting the heading is not walking. Nothing calls drive() while there are no legs, so a
-			-- run that only stored moveDir here stood still for as long as the planner kept failing.
-			-- The lane is steered and sent every frame, so thinking happens with the body in motion.
 			danger.push(run, root, danger.openDir(root, threat) or run.moveDir or root.CFrame.LookVector)
 			RunService.Heartbeat:Wait()
 			continue
@@ -3084,8 +3006,6 @@ function danger.brain()
 			local g = t and danger.gap(r.Position, t) or math.huge
 			if mode == "flee" then
 				if (g > danger.safe and not (t and danger.closeBy(r.Position, t, 40))) or os.clock() - legAt > 1.2 then run.retarget = true end
-				-- He moves while we run it, so the route we are on is re-checked against where he is
-				-- now, not where he was when it was chosen: a leg he has stepped into is abandoned
 				if t and run.points and os.clock() - (run.checkAt or 0) > 0.15 then
 					run.checkAt = os.clock()
 					if not danger.routeSafe(run.points, r.Position, t, run.leg) then run.retarget = true end
@@ -3197,6 +3117,7 @@ function danger.stopAll()
 	halt()
 end
 
+---------------------------------------------------------------------------------------------- Voting
 -- "Bank2" on the map and "BANK" on the pad are the same place
 function vote.same(a, b)
 	local function fold(t)
@@ -3375,6 +3296,7 @@ function vote.hook()
 	end
 end
 
+---------------------------------------------------------------------------------------------- Combat
 -- Legit mode: nothing teleports and nothing reaches through walls; the walker closes the distance first
 local function legitStab(entry)
 	local root, target = myRoot(), hitPartOf(entry.player)
@@ -3468,7 +3390,6 @@ function sniper.backOff(run, hum, here, toward, entry, gunOff, who)
 		sniper.steer(run, hum, legs[1].Position, "Slipping past")
 		return
 	end
-	-- Nowhere checked to step back to: keep sliding along whatever lane is open rather than planting
 	sniper.status("Cornered")
 	local root2 = myRoot()
 	run.moveDir = (root2 and danger.openDir(root2, entry.root)) or run.moveDir
@@ -3493,7 +3414,6 @@ function sniper.strafeSpot(here, toward, entry, gunOff, who, scale)
 	return nil
 end
 
--- No line anywhere near: route toward them, and come back the moment a line opens or the gap closes
 -- Approach by route; two legs in a row that moved the body under 3 studs report the first move as failed,
 -- so a rim the walk cannot reach is unlearned instead of pushed at every 1.5 s
 function sniper.approach(run, hum, who, blocker)
@@ -3658,8 +3578,6 @@ function sniper.duel(who, limit)
 			if dist < sniper.close then
 				sniper.backOff(run, hum, here, toward, entry, gunOff, who)
 			else
-				-- The shot is away and the reload is running: that time is spent sidestepping across
-				-- his aim rather than standing in it, which is also what a real player does
 				sniper.status("Line is clear")
 				local side = Vector3.new(-toward.Z, 0, toward.X) * (sniper.side or 1)
 				local standUntil = os.clock() + 0.3
@@ -3690,8 +3608,6 @@ function sniper.duel(who, limit)
 				if vantage then
 					sniper.goTo(run, hum, vantage, who, "Moving for a line")
 				else
-					-- No line and nowhere better to stand: circle him rather than wait on the spot,
-					-- since moving across the cover is what opens a line in the first place
 					sniper.status("Waiting for a line")
 					local side = Vector3.new(-toward.Z, 0, toward.X) * (sniper.side or 1)
 					local standUntil = os.clock() + 0.2
@@ -3758,6 +3674,7 @@ local function attackMany(list)
 	return done
 end
 
+----------------------------------------------------------------------------------------------- Coins
 -- A freshly spawned coin that is much closer than the current one interrupts the leg
 function onCoinAdded(part)
 	local run = coinRun
@@ -3811,6 +3728,7 @@ end
 
 local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {} }
 
+------------------------------------------------------------------------------------------------- ESP
 local function clearMap(map)
 	for key, inst in pairs(map) do
 		inst:Destroy()
@@ -4022,6 +3940,7 @@ local plr = { walkSaved = nil, jumpSaved = nil, flyVel = nil, flyGyro = nil, fly
 
 local UserInputService = game:GetService("UserInputService")
 
+---------------------------------------------------------------------------------------------- Player
 function plr.plrRestoreWalk()
 	local hum = myHumanoid()
 	if hum then
@@ -4043,7 +3962,6 @@ function plr.plrRestoreJump()
 	plr.jumpSaved = nil
 end
 
--- Flight is a velocity mover on the root; the camera gives the frame and WASD the direction
 -- Parts forced through walls remember they were solid, so switching off puts them back the same frame
 function plr.uncollide(part)
 	if part.CanCollide then
@@ -5045,6 +4963,7 @@ setSec:Credit({
 	Description = "Join for updates and support.",
 })
 
+----------------------------------------------------------------------------------------------- Stats
 local function profileXP()
 	return ProfileData.NewXP
 end
@@ -5242,6 +5161,7 @@ end
 
 local round = { map = nil, countedRole = nil, selfReset = false, died = false, prev = {}, seenGuns = {}, dropNotice = 0 }
 
+---------------------------------------------------------------------------------------- Round events
 local function onMap(map)
 	if map == round.map then return end
 	round.map = map
@@ -5547,9 +5467,6 @@ win:Track(RunService.Heartbeat:Connect(function()
 		if borrowed and not coinRun then restoreMovement() end
 	end
 
-	-- Nothing pins the body for longer than it takes to line a shot up. This ran on the one-second
-	-- timer before, which meant a pin that outlived its owner could hold the character still for as
-	-- long as it liked; it is checked every frame now and released the moment it overstays.
 	if hold.conn and now - hold.since > 0.5 then releaseHold() end
 
 	if coinRun and now - T.rethink >= COIN_RETHINK then
