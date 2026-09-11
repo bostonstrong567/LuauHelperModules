@@ -7032,19 +7032,23 @@ function esp.heatDraw()
 			local strength = 1 - (onPlan - 1) / 14
 			tile.Color = Color3.fromRGB(255, 255, 255)
 			tile.Transparency = 0.3 - strength * 0.22
-			tile.Size = Vector3.new(pitch, 0.2 + strength * 0.5, pitch)
-			tile.CFrame = CFrame.new(floor + Vector3.new(0, 0.14 + strength * 0.25, 0))
+			-- stay flat: widen and sit a little prouder, never grow tall enough to read as a post
+			tile.Size = Vector3.new(pitch * 1.02, 0.16, pitch * 1.02)
+			tile.CFrame = CFrame.new(floor + Vector3.new(0, 0.16 + strength * 0.06, 0))
 		end
 	end
 
 	-- every way off this tile that is not plain walking: jumps, drops, climbs, ledges
+	-- one bar per affordance, not per entry node, or a shared ledge draws dozens
+	local drawnAff = {}
 	for _, node in nodes do
 		if used > (state.heatTiles or 12000) + 2000 then break end
 		local okAff, list = pcall(function() return world:AffordancesAt(node) end)
 		if okAff and list then
 			for _, aff in list do
-				local exits = aff.Exits or aff.Entries
+				local exits = (not drawnAff[aff]) and (aff.Exits or aff.Entries)
 				if exits then
+					drawnAff[aff] = true
 					for _, exit in exits do
 						local to = exit.Position or exit.Floor
 						if to then
