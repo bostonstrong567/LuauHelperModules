@@ -96,7 +96,7 @@ local AIM_FOV_MAX = 800
 local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
 local COIN_RETHINK = 0.5
-local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false }
+local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false, touchWas = setmetatable({}, { __mode = "k" }), touchOff = false }
 function danger.path(radius, spacing)
 	return PathfindingService:CreatePath({
 		AgentRadius = radius,
@@ -146,6 +146,7 @@ local state = {
 	autoKillAll = false,
 	autoKillSheriff = false,
 	killAura = false,
+	noStab = false,
 	silentAim = false,
 	resetFor = { Murderer = true },
 	spareFriends = false,
@@ -665,24 +666,6 @@ function danger.fallGuard(now)
 	end
 	local box = boundsOf(map)
 	local floor = box.cf.Position.Y - box.size.Y / 2
-	local run = danger.run
-	local wants = run ~= nil and (run.moveDir ~= nil or run.points ~= nil)
-	if wants and danger.wedgeAt and (root.Position - danger.wedgeAt).Magnitude < 0.5 then
-		if now - danger.wedgeSince > 6 then
-			local trail = danger.safeTrail or {}
-			for i = #trail, 1, -1 do
-				if (trail[i] - root.Position).Magnitude >= 4 then
-					danger.wedgeAt, danger.wedgeSince = nil, now
-					root.CFrame = CFrame.new(trail[i] + Vector3.new(0, 2, 0)) * root.CFrame.Rotation
-					root.AssemblyLinearVelocity = Vector3.zero
-					say("Stepped back out of a wedge", "life-buoy", "muted")
-					return
-				end
-			end
-		end
-	else
-		danger.wedgeAt, danger.wedgeSince = root.Position, now
-	end
 	if root.Position.Y > floor and hum.FloorMaterial ~= Enum.Material.Air and insideBox(root.Position, box.cf, box.size, 4) then
 		danger.safePos = root.Position
 		local trail = danger.safeTrail or {}
@@ -1363,6 +1346,34 @@ function danger.watchThrows()
 		return signal:Connect(heard)
 	end)
 	if fine and conn then danger.throwHooked = true end
+end
+
+function danger.untouchable(on)
+	local char = myChar()
+	if not char then return end
+	for _, part in char:GetDescendants() do
+		if part:IsA("BasePart") then
+			if on then
+				if danger.touchWas[part] == nil then danger.touchWas[part] = part.CanTouch end
+				part.CanTouch = false
+			elseif danger.touchWas[part] ~= nil then
+				part.CanTouch = danger.touchWas[part]
+				danger.touchWas[part] = nil
+			end
+		end
+	end
+end
+
+function danger.guardTouch()
+	if not state.noStab then
+		if danger.touchOff then
+			danger.untouchable(false)
+			danger.touchOff = false
+		end
+		return
+	end
+	danger.touchOff = true
+	danger.untouchable(true)
 end
 
 function danger.dangerous(threat)
@@ -3765,22 +3776,7 @@ local function rethinkCoin()
 	end
 end
 
-local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {}, masks = setmetatable({}, { __mode = "k" }) }
-
-function esp.mask(char)
-	for _, thing in char:GetChildren() do
-		local weapon = thing:IsA("Tool") or (thing:IsA("Model") and thing:GetAttribute("IsWeapon") ~= nil)
-		if weapon and not esp.masks[thing] then
-			local blank = Instance.new("Highlight")
-			blank.Name = "MM2Mask"
-			blank.Adornee = thing
-			blank.FillTransparency = 1
-			blank.OutlineTransparency = 1
-			blank.Parent = thing
-			esp.masks[thing] = blank
-		end
-	end
-end
+local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {} }
 
 function danger.corpseOf(body)
 	local hum = body:FindFirstChildOfClass("Humanoid")
@@ -3861,7 +3857,6 @@ local function refreshRoleEsp()
 				hl.Parent = char
 				esp.highlights[who] = hl
 			end
-			esp.mask(char)
 			local colour = ROLE_COLOURS[role] or Color3.new(1, 1, 1)
 			hl.FillColor = colour
 			hl.OutlineColor = colour
@@ -4210,6 +4205,18 @@ combatSec:Toggle({
 	Callback = function(on)
 		state.spareFriends = on
 		table.clear(danger.friends)
+	end,
+})
+
+combatSec:Toggle({
+	Text = "Block stabs",
+	Description = "Turns off CanTouch on your own body, so the murderer's knife never fires its Touched handler against you. Thrown knives and guns still hit.",
+	Icon = "shield-ban",
+	Save = prefs.key("combat", "noStab"),
+	Callback = function(on)
+		state.noStab = on
+		danger.guardTouch()
+		say(on and "Stab blocking on" or "Stab blocking off", "shield-ban", on and "accent" or "muted")
 	end,
 })
 
@@ -5618,6 +5625,7 @@ win:Track(RunService.Heartbeat:Connect(function()
 		local delta = now - T.tick
 		T.tick = now
 		danger.watchThrows()
+		danger.guardTouch()
 		local liveMap = getMap()
 		if liveMap ~= nav.map and now - T.navFix > 5 then
 			T.navFix = now
