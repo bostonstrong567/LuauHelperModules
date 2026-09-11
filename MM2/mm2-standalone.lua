@@ -3734,6 +3734,11 @@ function nav.reset()
 	nav.world, nav.navigator, nav.map, nav.ready, nav.count = nil, nil, nil, false, 0
 end
 
+function nav.live()
+	if not nav.ready or not nav.map then return false end
+	return nav.map.Parent ~= nil
+end
+
 function nav.ignore()
 	local list = {}
 	for _, who in Players:GetPlayers() do
@@ -3787,7 +3792,7 @@ end
 
 function nav.warm(world)
 	nav.warmed = 0
-	while nav.world == world and nav.ready do
+	while nav.world == world and nav.live() do
 		local root = myRoot()
 		local from = root and not inLobby() and root.Position
 		if not from then
@@ -3803,7 +3808,7 @@ function nav.warm(world)
 end
 
 function danger.legFailed(run, wp, outcome, why)
-	if not (nav.ready and nav.navigator and type(wp) == "table" and wp.Transition) then return false end
+	if not (nav.live() and nav.navigator and type(wp) == "table" and wp.Transition) then return false end
 	nav.navigator:Report(wp.Transition, outcome or false)
 	local at = wp.Position
 	run.learned = string.format("%s %s at (%.0f,%.0f,%.0f)", wp.Transition.Kind, why or "failed", at.X, at.Y, at.Z)
@@ -3811,7 +3816,7 @@ function danger.legFailed(run, wp, outcome, why)
 end
 
 function danger.legDone(wp, outcome)
-	if nav.ready and nav.navigator and type(wp) == "table" and wp.Transition then nav.navigator:Report(wp.Transition, outcome) end
+	if nav.live() and nav.navigator and type(wp) == "table" and wp.Transition then nav.navigator:Report(wp.Transition, outcome) end
 end
 
 function danger.lift()
@@ -3819,21 +3824,21 @@ function danger.lift()
 end
 
 function danger.straight(here, floorPoint)
-	if not nav.ready then return false end
+	if not nav.live() then return false end
 	local lift = nav.agent:Lift()
 	local ctx = { Agent = nav.agent, Geometry = nav.world.geometry, World = nav.world }
 	return UniversalNav.Traversal.Ground.Between(here - Vector3.new(0, 3 - lift, 0), floorPoint + Vector3.new(0, lift, 0), ctx) ~= nil
 end
 
 function danger.roomAhead(from, dir, want)
-	if not nav.ready then return true end
+	if not nav.live() then return true end
 	local lift = nav.agent:Lift()
 	local ctx = { Agent = nav.agent, Geometry = nav.world.geometry, World = nav.world }
 	return UniversalNav.Steering.Room(from - Vector3.new(0, 3 - lift, 0), dir, ctx, want + 1) >= want
 end
 
 function danger.bendAround(from, dir, memo)
-	if not nav.ready then return nil end
+	if not nav.live() then return nil end
 	local lift = nav.agent:Lift()
 	local ctx = { Agent = nav.agent, Geometry = nav.world.geometry, World = nav.world }
 	local bent = UniversalNav.Steering.Heading(from - Vector3.new(0, 3 - lift, 0), dir, ctx, memo)
@@ -3857,7 +3862,7 @@ function danger.push(run, root, dir)
 end
 
 function danger.steerClear(root, dir, fix)
-	if not nav.ready then return dir, false, false end
+	if not nav.live() then return dir, false, false end
 	local lift = nav.agent:Lift()
 	local from = root.Position - Vector3.new(0, 3 - lift, 0)
 	local ctx = { Agent = nav.agent, Geometry = nav.world.geometry, World = nav.world }
@@ -3899,7 +3904,7 @@ function nav.costFor(him, me, careful)
 end
 
 function nav.openness(pos)
-	if not nav.ready then return 0 end
+	if not nav.live() then return 0 end
 	local count = 0
 	for _, n in nav.world:Nearby(pos, 24) do
 		if math.abs(n.Position.Y - pos.Y) <= 6 then count += 1 end
@@ -3908,7 +3913,7 @@ function nav.openness(pos)
 end
 
 function nav.route(from, goal, cheap)
-	if not nav.ready then return nil end
+	if not nav.live() then return nil end
 	nav.calls += 1
 	local foe = danger.foe()
 	local gap = foe and danger.gap(from, foe) or math.huge
@@ -3964,7 +3969,7 @@ end
 
 local function legsTo(from, goal, ignore)
 	local finalLeg = { Position = goal, Action = Enum.PathWaypointAction.Walk, Label = "" }
-	local direct = nav.ready and nav.navigator:DirectTransition({ Agent = nav.agent, Start = from, Goal = goal })
+	local direct = nav.live() and nav.navigator:DirectTransition({ Agent = nav.agent, Start = from, Goal = goal })
 	if direct then
 		return { {
 			Position = goal,
@@ -3973,7 +3978,7 @@ local function legsTo(from, goal, ignore)
 			Transition = direct,
 		} }
 	end
-	if not nav.ready and lineIsClear(from, goal, ignore) then return { finalLeg } end
+	if not nav.live() and lineIsClear(from, goal, ignore) then return { finalLeg } end
 	local best, bestTime = nil, math.huge
 	if state.coinPath and (danger.traps[danger.goalKey(from)] or 0) < os.clock() then
 		local rp = excludeMe()
@@ -4522,7 +4527,7 @@ end
 
 function danger.roamLegs(root, threatRoot)
 	local map = getMap()
-	if not (map and nav.ready) then return nil end
+	if not (map and nav.live()) then return nil end
 	local here = root.Position
 	local now = os.clock()
 	local ahead = threatRoot and danger.ahead(threatRoot)
@@ -4581,7 +4586,7 @@ end
 
 function danger.farSpot(root, threat)
 	local map = getMap()
-	if not map or not nav.ready or not nav.world then return nil end
+	if not map or not nav.live() or not nav.world then return nil end
 	local box = boundsOf(map)
 	local centre = box.cf.Position
 	local hx, hz = box.size.X * 0.42, box.size.Z * 0.42
@@ -5304,7 +5309,7 @@ end
 
 function sniper.vantage(here, entry, gunOff)
 	local now = os.clock()
-	if not nav.ready or now - (sniper.vantageAt or 0) < 1 then return nil end
+	if not nav.live() or now - (sniper.vantageAt or 0) < 1 then return nil end
 	sniper.vantageAt = now
 	local them = entry.root.Position
 	local near = nav.world:Nearby(here, 60)
@@ -7353,7 +7358,7 @@ win:Track(Players.PlayerRemoving:Connect(function(who)
 	refreshAll()
 end))
 
-local T = { aura = 0, coinStart = 0, tick = 0, autoTick = 0, rethink = 0, actCheck = 0, actOk = false, roam = 0, fall = 0 }
+local T = { aura = 0, coinStart = 0, tick = 0, autoTick = 0, rethink = 0, actCheck = 0, actOk = false, roam = 0, fall = 0, navFix = 0 }
 
 win:Track(player.Idled:Connect(function()
 	if not state.antiIdle then return end
@@ -7375,6 +7380,11 @@ win:Track(RunService.Heartbeat:Connect(function()
 	if now - T.tick >= 1 then
 		local delta = now - T.tick
 		T.tick = now
+		local liveMap = getMap()
+		if liveMap ~= nav.map and now - T.navFix > 5 then
+			T.navFix = now
+			if liveMap then task.spawn(nav.build, liveMap) else nav.reset() end
+		end
 		if delta < 5 then totals.playtime += delta end
 		if state.roleEsp then refreshRoleEsp() end
 		local xp = profileXP()
