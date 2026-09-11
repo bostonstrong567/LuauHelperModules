@@ -718,14 +718,18 @@ function danger.weaponRay(from, to)
 	local ignore = danger.weaponIgnore()
 	local rp = danger.rayIgnoring(ignore)
 	local dir = to - from
-	while true do
+	local seen = {}
+	for _ = 1, 24 do
 		local hit = Workspace:Raycast(from, dir, rp)
 		if not hit then return nil end
 		local part = hit.Instance
 		if not part or part.Transparency ~= 1 then return hit end
+		if seen[part] then return hit end
+		seen[part] = true
 		table.insert(ignore, part)
 		rp = danger.rayIgnoring(ignore)
 	end
+	return nil
 end
 
 local function shotIsClear(fromPos, targetPart)
@@ -2155,6 +2159,7 @@ local function coinLoop(run)
 	local lastCheck = 0
 
 	while run.active do
+		RunService.Heartbeat:Wait()
 		local now = os.clock()
 		if now - lastCheck > 0.25 then
 			lastCheck = now
