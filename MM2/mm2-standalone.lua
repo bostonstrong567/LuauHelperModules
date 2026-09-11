@@ -3022,6 +3022,17 @@ local function droppedGuns()
 	return out
 end
 
+function danger.heldGuns()
+	local out = {}
+	for _, who in Players:GetPlayers() do
+		local char = who ~= player and who.Character
+		local tool = char and char:FindFirstChild("Gun")
+		local handle = tool and tool:FindFirstChild("Handle")
+		if handle and handle:IsA("BasePart") then table.insert(out, handle) end
+	end
+	return out
+end
+
 local function nearestGun(from)
 	local best, bestDist
 	for _, gun in droppedGuns() do
@@ -5821,7 +5832,9 @@ local function refreshGunEsp()
 		clearMap(esp.gunBoxes)
 		return
 	end
-	syncBoxes(esp.gunBoxes, droppedGuns(), ROLE_COLOURS.Sheriff, adornGun)
+	local guns = droppedGuns()
+	for _, held in danger.heldGuns() do table.insert(guns, held) end
+	syncBoxes(esp.gunBoxes, guns, ROLE_COLOURS.Sheriff, adornGun)
 end
 
 local function teleportToGameMap()
