@@ -2037,7 +2037,12 @@ end
 
 function nav.live()
 	if not nav.ready or not nav.map then return false end
-	return nav.map.Parent ~= nil
+	if nav.map.Parent == nil then
+		-- the map this lattice was built from is gone; the nodes describe dead geometry
+		nav.ready = false
+		return false
+	end
+	return nav.world ~= nil and nav.world.model == nav.map
 end
 
 function nav.ignore()
@@ -2105,7 +2110,12 @@ function nav.build(map)
 	if nav.world ~= world then return end
 	nav.count = world.Count
 	nav.ready = ok
-	if ok then task.spawn(nav.warm, world) end
+	if ok then
+		task.spawn(nav.warm, world)
+	else
+		-- the model died mid-scan, or produced nothing: let the tick try again at once
+		nav.map = nil
+	end
 end
 
 function nav.warm(world)
@@ -5125,7 +5135,7 @@ function esp.heatDraw()
 
 	for _, node in nodes do
 		used += 1
-		if used > (state.heatTiles or 4000) then break end
+		if used > (state.heatTiles or 12000) then break end
 		local tile = esp.heatTile(used)
 		local floor = node.Floor or node.Position
 		local head = node.Clear or pitch
@@ -5172,7 +5182,7 @@ function esp.heatDraw()
 
 	-- every way off this tile that is not plain walking: jumps, drops, climbs, ledges
 	for _, node in nodes do
-		if used > (state.heatTiles or 4000) + 600 then break end
+		if used > (state.heatTiles or 12000) + 2000 then break end
 		local okAff, list = pcall(function() return world:AffordancesAt(node) end)
 		if okAff and list then
 			for _, aff in list do
@@ -5182,7 +5192,7 @@ function esp.heatDraw()
 						local to = exit.Position or exit.Floor
 						if to then
 							used += 1
-							if used > (state.heatTiles or 4000) + 600 then break end
+							if used > (state.heatTiles or 12000) + 2000 then break end
 							local link = esp.heatTile(used)
 							local from = (node.Floor or node.Position) + Vector3.new(0, 0.6, 0)
 							local span = to - from
@@ -6096,9 +6106,11 @@ win:Track(RunService.Heartbeat:Connect(function()
 			if who ~= player and not danger.knifeSeen[who] then danger.sawKnife(who) end
 		end
 		local liveMap = getMap()
-		if liveMap ~= nav.map and now - T.navFix > 5 then
+		local lost = nav.map ~= nil and nav.map.Parent == nil
+		if (liveMap ~= nav.map or lost) and now - T.navFix > 5 then
 			T.navFix = now
-			if liveMap then task.spawn(nav.build, liveMap) else nav.reset() end
+			if lost and liveMap == nav.map then nav.reset() end
+			if liveMap and liveMap.Parent then task.spawn(nav.build, liveMap) else nav.reset() end
 		end
 		if delta < 5 then totals.playtime += delta end
 		if state.roleEsp then refreshRoleEsp() end
