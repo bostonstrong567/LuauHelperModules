@@ -5024,7 +5024,7 @@ esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, trapsAt 
 	pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }),
 	shade = setmetatable({}, { __mode = "k" }), traps = setmetatable({}, { __mode = "k" }),
 	lit = setmetatable({}, { __mode = "k" }), cutOf = setmetatable({}, { __mode = "k" }), was = nil,
-	owner = setmetatable({}, { __mode = "k" }) }
+	owner = setmetatable({}, { __mode = "k" }), cut = nil }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -5107,6 +5107,7 @@ function esp.heatDraw()
 		esp.heat.at = 0
 		table.clear(esp.heat.pieces)
 		table.clear(esp.heat.risks)
+		esp.heat.cut = nil
 	end
 	-- redraw every frame; the work is skipped per tile when nothing about it changed
 	local moved = not esp.heat.was or (root.Position - esp.heat.was).Magnitude > 1
@@ -5129,31 +5130,36 @@ function esp.heatDraw()
 	local standing = world:NodeAt(here, 8)
 	local mine = standing and esp.heatPiece(standing) or nil
 	local eye, look, minDot = esp.heatCone()
+	local budget = state.heatTiles or 2200
+	-- How far to draw is not a setting, it is whatever fits the budget on this map.
+	-- Sorting the candidates to keep the nearest cost 8ms a draw on a 24k-node map;
+	-- letting the distance find its own level costs nothing and settles in six draws.
+	local cut = math.min(esp.heat.cut or range, range)
 	local nodes = {}
 	if eye then
-		-- the whole map is a candidate; the camera decides what is worth a part
+		local reach = cut * cut
 		for _, byZ in pairs(world.columns) do
 			for _, list in pairs(byZ) do
 				for _, node in list do
 					local to = node.Position - eye
-					local far = to.Magnitude
-					if far <= range then
-						-- behind the camera, or outside the cone: never drawn, never paid for
-						if far < 12 or to.Unit:Dot(look) >= minDot then
+					local far = to.X * to.X + to.Y * to.Y + to.Z * to.Z
+					if far <= reach then
+						-- behind the camera is never drawn; underfoot is always drawn
+						if far < 144 or to:Dot(look) >= minDot * math.sqrt(far) then
 							table.insert(nodes, node)
 						end
 					end
 				end
 			end
 		end
+		-- pull in when it costs too much, ease back out when there is room to spare
+		if #nodes > budget then
+			esp.heat.cut = math.max(cut * 0.92, 40)
+		elseif #nodes < budget * 0.8 then
+			esp.heat.cut = math.min(cut * 1.05, range)
+		end
 	else
 		nodes = world:Nearby(here, range)
-	end
-	-- a dense map can still overflow the budget: keep the near ones, drop the rest
-	if #nodes > (state.heatTiles or 2200) then
-		table.sort(nodes, function(a, b)
-			return (a.Position - here).Magnitude < (b.Position - here).Magnitude
-		end)
 	end
 	local used = 0
 	local flatSize = Vector3.new(pitch, 0.15, pitch)
@@ -5404,8 +5410,8 @@ setSec:Toggle({
 })
 
 setSec:Slider({
-	Text = "Heatmap range",
-	Description = "How far the heatmap fills, in studs.",
+	Text = "Heatmap reach",
+	Description = "The furthest the heatmap may reach. It draws closer than this when a map is dense enough to need it.",
 	Icon = "ruler",
 	Min = 40,
 	Max = 400,
