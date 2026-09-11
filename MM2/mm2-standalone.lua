@@ -2413,6 +2413,7 @@ local gone = false
 
 local function say(text, icon, colour, holdFor)
 	if gone then return end
+	if os.clock() - (state.booted or 0) < 3 then return end
 	holdUntil = os.clock() + (holdFor or 3)
 	shownStatus = nil
 	win.StatusBar:Set(text, { Icon = icon or "circle-dot", Color = colour or "muted" })
@@ -5903,6 +5904,8 @@ function plr.playerTick()
 	if state.gravity ~= 196 and Workspace.Gravity ~= state.gravity then Workspace.Gravity = state.gravity end
 	if state.fly then plr.flyStep() end
 end
+
+state.booted = os.clock()
 
 ui.controls = {}
 do
