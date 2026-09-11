@@ -2562,6 +2562,32 @@ local function excludeMe()
 	return danger.rayIgnoring({ myChar() })
 end
 
+function danger.stepHeight()
+	local hum, root = myHumanoid(), myRoot()
+	if not hum or not root then return 2.5 end
+	return hum.HipHeight + root.Size.Y / 2
+end
+
+function danger.canStepOver(root, dir)
+	local hum = myHumanoid()
+	if not hum then return false end
+	local foot = root.Position.Y - danger.stepHeight()
+	local reach = math.max(root.Size.Z, 2) + 1.5
+	local rp = excludeMe()
+	rp.RespectCanCollide = true
+	local clear = hum.HipHeight + 0.6
+	-- something at shin height that the body clears by walking is not an obstacle
+	local low = Workspace:Raycast(Vector3.new(root.Position.X, foot + 0.25, root.Position.Z), dir * reach, rp)
+	if not low then return false end
+	local above = Workspace:Raycast(Vector3.new(root.Position.X, foot + clear, root.Position.Z), dir * reach, rp)
+	if above then return false end
+	local top = Workspace:Raycast(
+		Vector3.new(root.Position.X, foot + clear, root.Position.Z) + dir * reach,
+		Vector3.new(0, -(clear + 0.5), 0), rp)
+	if not top then return true end
+	return (top.Position.Y - foot) <= clear
+end
+
 function danger.weaponIgnore()
 	local map = getMap()
 	local list = { myChar(), map and map:FindFirstChild("CoinContainer") }
@@ -3417,7 +3443,7 @@ local function drive(run, root, hum, target, speed)
 		elseif run.moveDir and danger.roomAhead(here, run.moveDir, 3) then
 			want = run.moveDir
 		else
-			jumpNow()
+			jumpNow(danger.canStepOver(root, want))
 		end
 	end
 	run.moveDir = want
@@ -3614,8 +3640,8 @@ local function travel(run, points, hum)
 					else
 						fix.wallTime = 0
 					end
-					if hop and fix.stalled > 0.15 and hum.FloorMaterial ~= Enum.Material.Air then
-						jumpNow()
+					if hop and hum.FloorMaterial ~= Enum.Material.Air then
+						jumpNow(true)
 					elseif not bent then
 						goal = nil
 					elseif bent ~= ahead.Unit then
@@ -3870,9 +3896,7 @@ function danger.steerClear(root, dir, fix)
 	local bent, _, blocker = UniversalNav.Steering.Heading(from, dir, ctx, fix.memo)
 	if bent == dir then return dir, false, false end
 	fix.wallHit = blocker
-	local knee = Workspace:Raycast(root.Position + Vector3.new(0, -2, 0), dir * 3, excludeMe())
-	local chest = Workspace:Raycast(root.Position + Vector3.new(0, 1, 0), dir * 3, excludeMe())
-	if knee and not chest then return dir, true, false end
+	if danger.canStepOver(root, dir) then return dir, true, false end
 	if bent then return bent, false, true end
 	return nil, false, true
 end
