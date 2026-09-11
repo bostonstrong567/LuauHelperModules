@@ -2298,7 +2298,7 @@ end
 function danger.wanting()
 	if danger.surviving() then return true end
 	local role = myRole()
-	if role == "Murderer" then return state.autoKillAll or state.autoKillSheriff end
+	if role == "Murderer" then return state.autoKillAll or state.autoKillSheriff or state.autoKillMurderer end
 	return (role == "Sheriff" or role == "Hero") and state.autoKillMurderer
 end
 
@@ -3701,6 +3701,20 @@ end
 
 local nav = { ready = false, count = 0, map = nil, calls = 0, used = 0, stats = {}, world = nil, navigator = nil, agent = nil }
 
+function nav.budget(cheap)
+	local seen = cheap and nav.costCheap or nav.costFull
+	if not seen then return cheap and 600 or 3000 end
+	return math.clamp(math.floor(seen * 4), cheap and 600 or 3000, 250000)
+end
+
+function nav.spent(cheap, expanded, why)
+	local seen = cheap and nav.costCheap or nav.costFull
+	local worst = math.max(expanded or 0, seen or 0)
+	if why == "cap" then worst = math.max(worst, (seen or 0) * 2, expanded * 2) end
+	local blend = seen and (seen * 0.8 + worst * 0.2) or worst
+	if cheap then nav.costCheap = blend else nav.costFull = blend end
+end
+
 ------------------------------------------------------------------------------------------ Navigation
 -- The map as a UniversalNav lattice, and routes priced to keep off the murderer's ground.
 function nav.reset()
@@ -3770,7 +3784,7 @@ function nav.warm(world)
 			from = spawn and spawn.Position
 		end
 		if from then
-			nav.warmed += nav.navigator:Warm({ Agent = nav.agent, Position = from, Nodes = 200, Budget = 0.002, Active = function() return nav.world == world end })
+			nav.warmed += nav.navigator:Warm({ Agent = nav.agent, Position = from, Nodes = math.min(nav.budget(true), 2000), Budget = 0.002, Active = function() return nav.world == world end })
 		end
 		task.wait(0.5)
 	end
@@ -3887,13 +3901,14 @@ function nav.route(from, goal, cheap)
 	local foe = danger.foe()
 	local gap = foe and danger.gap(from, foe) or math.huge
 	local policies = UniversalNav.ProbePolicies
-	local policy = (cheap or gap < 90 or danger.pursuing) and policies.Never or policies.Conservative
-	local search = cheap and { MaxExpansions = 400, TimeSlice = 0.002 } or gap < 60 and { MaxExpansions = 2500, TimeSlice = 0.008 } or { MaxExpansions = 6000, TimeSlice = 0.005 }
+	local policy = cheap and policies.Never or policies.Conservative
+	local search = { MaxExpansions = nav.budget(cheap), TimeSlice = gap < 60 and 0.008 or 0.005 }
 	local him = (not cheap and foe and danger.root() ~= nil) and foe.Position or nil
 	local result = nav.navigator:FindPath({ Agent = nav.agent, Start = from, Goal = goal, Blocked = nav.blocked, SearchPolicy = search, ProbePolicy = policy, Cost = nav.costFor(him, from, gap < 90) })
 	local st = result.Stats
 	nav.stats = { why = result.Why, expanded = st.Expanded, ms = st.Ms, legs = result.Path and #result.Path or 0, jumps = 0, req = st.Requests, hits = st.Hits, rays = st.Rays, casts = st.Casts, probing = result.Probing }
 	nav.lastTime = result.Time
+	nav.spent(cheap, st.Expanded, result.Why)
 	if not result.Path then return nil end
 	local legs = {}
 	for _, t in result.Path do
@@ -3954,16 +3969,14 @@ local function legsTo(from, goal, ignore)
 		local floor = Workspace:Raycast(goal, Vector3.new(0, -12, 0), rp)
 		local legs = routeTo(from, floor and floor.Position or goal)
 		if legs and not danger.throughTrap(legs) then
-			local climbs, length, prev = false, 0, from
+			local climbs, length, prev = 0, 0, from
 			for _, wp in legs do
-				if wp.Label == "Climb" then climbs = true end
+				if wp.Label == "Climb" or wp.Action == Enum.PathWaypointAction.Jump then climbs += 1 end
 				length += (wp.Position - prev).Magnitude
 				prev = wp.Position
 			end
-			if not climbs then
-				table.insert(legs, finalLeg)
-				best, bestTime = legs, length / nav.speed()
-			end
+			table.insert(legs, finalLeg)
+			best, bestTime = legs, length / nav.speed() + climbs * 1.5
 		end
 	end
 	local legs = nav.route(from, goal)
@@ -4208,7 +4221,7 @@ local function pursue(who, reach)
 	local root0, target0 = myRoot(), hitPartOf(who)
 	if not root0 or not target0 then return false end
 	if (target0.Position - root0.Position).Magnitude > reach and not sniper.legsToward(root0, who, target0) then
-		sniper.noPath[who] = os.clock() + 4
+		sniper.noPath[who] = os.clock() + 1
 		return false
 	end
 	danger.pursuing = true
@@ -4221,7 +4234,9 @@ local function pursue(who, reach)
 	end
 	local reached = false
 	local okLoop, errLoop = pcall(function()
-	for _ = 1, 24 do
+	local until_ = os.clock() + 30
+	while os.clock() < until_ do
+		RunService.Heartbeat:Wait()
 		if not run.active or not alive() then break end
 		local root, target = myRoot(), hitPartOf(who)
 		if not root or not target then break end
@@ -4232,7 +4247,7 @@ local function pursue(who, reach)
 		local them = target.Position
 		local legs, goal = sniper.legsToward(root, who, target)
 		if not legs then
-			sniper.noPath[who] = os.clock() + 4
+			sniper.noPath[who] = os.clock() + 1
 			break
 		end
 		run.retarget = false
@@ -4403,7 +4418,7 @@ function danger.fleeLegs(root, threat)
 		Agent = nav.agent,
 		Position = here,
 		Reach = 200,
-		Nodes = 700,
+		Nodes = nav.budget(false),
 		Blocked = nav.blocked,
 		Score = function(state)
 			local p = state.Position
@@ -4450,7 +4465,9 @@ function danger.flee(threat)
 	run.speed = 25
 	local hum = borrowMovement()
 	if hum then
-		for _ = 1, 12 do
+		local until_ = os.clock() + 30
+		while os.clock() < until_ do
+			RunService.Heartbeat:Wait()
 			local root = myRoot()
 			if not run.active or not root or not threat.Parent then break end
 			if danger.gap(root.Position, threat) > danger.safe then break end
@@ -4505,7 +4522,7 @@ function danger.roamLegs(root, threatRoot)
 			Agent = nav.agent,
 			Position = here,
 			Reach = 250,
-			Nodes = 900,
+			Nodes = nav.budget(false),
 			Budget = 0.004,
 			Blocked = nav.blocked,
 			Score = function(state)
@@ -4754,7 +4771,7 @@ function danger.brain()
 					end
 				end
 				if not legs then
-					sniper.noPath[hunt.player] = now + 4
+					sniper.noPath[hunt.player] = now + 1
 					note("hunt no legs to " .. hunt.player.Name)
 				end
 			elseif not hunt then
@@ -5239,7 +5256,7 @@ function sniper.approach(run, hum, who, blocker)
 	if not legs then
 		do
 			sniper.status("No way to reach them from here")
-			sniper.noPath[who] = os.clock() + 4
+			sniper.noPath[who] = os.clock() + 1
 			danger.push(run, root, danger.openDir(root, nil) or run.moveDir)
 			RunService.Heartbeat:Wait()
 			return
@@ -5265,7 +5282,7 @@ function sniper.approach(run, hum, who, blocker)
 		sniper.crawls = (sniper.crawls or 0) + 1
 		if sniper.crawls >= 2 then
 			sniper.crawls = 0
-			if not danger.legFailed(run, legs[1], nil, "crawl") then sniper.noPath[who] = os.clock() + 4 end
+			if not danger.legFailed(run, legs[1], nil, "crawl") then sniper.noPath[who] = os.clock() + 1 end
 		end
 	else
 		sniper.crawls = 0
