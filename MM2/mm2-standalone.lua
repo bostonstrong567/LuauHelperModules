@@ -6876,7 +6876,9 @@ ui.colourSec:ColorPicker({
 -- Draws the lattice around you, green where the router can reach and red where it cannot.
 -- Everything lives on esp.heat and under one MM2Heat folder, so deleting this fenced block
 -- and the esp.heat teardown line in OnDestroy removes it completely.
-esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }) }
+esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, trapsAt = 0,
+	pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }),
+	shade = setmetatable({}, { __mode = "k" }), traps = setmetatable({}, { __mode = "k" }) }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -6894,14 +6896,15 @@ function esp.heatClear()
 end
 
 function esp.heatColour(fraction)
-	-- cold blue, through green and yellow, to hot red
+	-- safe deep blue, through green and amber, to a pale hot core over the murderer
 	local stops = {
-		Color3.fromRGB(40, 90, 235),
-		Color3.fromRGB(40, 200, 180),
-		Color3.fromRGB(70, 220, 90),
-		Color3.fromRGB(240, 220, 60),
-		Color3.fromRGB(240, 140, 50),
-		Color3.fromRGB(230, 50, 50),
+		Color3.fromRGB(20, 60, 200),
+		Color3.fromRGB(30, 170, 200),
+		Color3.fromRGB(60, 215, 110),
+		Color3.fromRGB(230, 225, 70),
+		Color3.fromRGB(245, 150, 45),
+		Color3.fromRGB(240, 60, 50),
+		Color3.fromRGB(255, 190, 190),
 	}
 	local f = math.clamp(fraction, 0, 1) * (#stops - 1)
 	local low = math.floor(f)
@@ -6972,6 +6975,21 @@ function esp.heatDraw()
 	local used = 0
 	local flatSize = Vector3.new(pitch, 0.15, pitch)
 
+	-- the murderer drives the heat: everything else is a modifier on top
+	local foe = danger.foe()
+	local hunter = foe and foe.Position or nil
+	local hunted = math.max(danger.safe or 60, 1)
+
+	-- trap and lethal memory, sampled per draw rather than per tile
+	if os.clock() - (esp.heat.trapsAt or 0) > 1 then
+		esp.heat.trapsAt = os.clock()
+		table.clear(esp.heat.traps)
+		for _, node in nodes do
+			local okT, bad = pcall(nav.blocked, node)
+			if okT and bad then esp.heat.traps[node] = true end
+		end
+	end
+
 	-- the route we are actually walking, so the planned way through stands out
 	local plan = {}
 	local run = coinRun
@@ -7000,9 +7018,7 @@ function esp.heatDraw()
 		-- tiles are reused between passes: a part that was a rotated link bar must be levelled
 		if tile.CFrame ~= rest then tile.CFrame = rest end
 
-		-- cost to stand here: how far, how much climbing, how exposed, how tight
-		local away = danger.flat(node.Position, here).Magnitude / math.max(range, 1)
-		local lift = math.abs(node.Position.Y - here.Y) / 30
+		-- how dangerous is it to stand here, not how far away is it
 		local risk = esp.heat.risks[node]
 		if risk == nil then
 			local okRisk, got = pcall(function() return world:Risk(node) end)
@@ -7010,7 +7026,22 @@ function esp.heatDraw()
 			esp.heat.risks[node] = risk
 		end
 		local tight = head < 6 and (6 - head) / 6 or 0
-		local heat = math.clamp(away * 0.55 + lift * 0.25 + risk * 1.2 + tight * 0.3, 0, 1)
+		local heat = risk * 0.8 + tight * 0.35
+
+		if hunter then
+			-- hottest where the murderer stands, cooling over his reach
+			local toHim = danger.flat(node.Position, hunter).Magnitude
+			local drop = math.abs(node.Position.Y - hunter.Y)
+			local near = 1 - math.clamp((toHim + drop * 2) / hunted, 0, 1)
+			heat += near * near * 1.9
+		end
+		if esp.heat.traps[node] then heat += 1.2 end
+		heat = math.clamp(heat, 0, 1)
+
+		-- ease toward the new value so the wash moves with you instead of snapping
+		local was = esp.heat.shade[node]
+		heat = was and (was * 0.72 + heat * 0.28) or heat
+		esp.heat.shade[node] = heat
 
 		local cut = mine ~= nil and esp.heatPiece(node) ~= mine
 		if cut then
@@ -7030,7 +7061,8 @@ function esp.heatDraw()
 		end
 		if onPlan then
 			local strength = 1 - (onPlan - 1) / 14
-			tile.Color = Color3.fromRGB(255, 255, 255)
+			-- the way we are walking: violet, so it never reads as heat or as a climb marker
+			tile.Color = Color3.fromRGB(150, 90, 255):Lerp(Color3.fromRGB(225, 200, 255), strength)
 			tile.Transparency = 0.3 - strength * 0.22
 			-- stay flat: widen and sit a little prouder, never grow tall enough to read as a post
 			tile.Size = Vector3.new(pitch * 1.02, 0.16, pitch * 1.02)
