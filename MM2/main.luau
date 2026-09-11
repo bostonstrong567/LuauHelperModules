@@ -57,7 +57,7 @@ local function fetchLib(name, url, accept)
 end
 
 local Ember = fetchLib("ember", "https://rbx.lol/ember.lua", function(lib) return type(lib.new) == "function" end)
-local UniversalNav = fetchLib("nav", "https://rbx.lol/nav.lua", function(lib) return type(lib.Navigator) == "table" end)
+local UniversalNav = fetchLib("nav", "https://raw.githubusercontent.com/bostonstrong567/LuauHelperModules/main/nav/UniversalNav.luau", function(lib) return type(lib.Navigator) == "table" end)
 
 pcall(function()
 	local live = rawget(getgenv(), "__EMBER_LIVE")

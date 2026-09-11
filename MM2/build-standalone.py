@@ -8,10 +8,10 @@ MAIN = os.path.join(HERE, "main.luau")
 NAV = os.path.join(HERE, "..", "nav", "UniversalNav.luau")
 OUT = os.path.join(HERE, "mm2-standalone.lua")
 
-NAVFETCH = 'local UniversalNav = fetchLib("nav", "https://rbx.lol/nav.lua", function(lib) return type(lib.Navigator) == "table" end)'
+NAVFETCH = 'local UniversalNav = fetchLib("nav", "https://raw.githubusercontent.com/bostonstrong567/LuauHelperModules/main/nav/UniversalNav.luau", function(lib) return type(lib.Navigator) == "table" end)'
 
 HEADER = (
-    "-- UniversalNav, the navigation framework. Normally fetched from rbx.lol/nav.lua; inlined here so\n"
+    "-- UniversalNav, the navigation framework. Normally fetched from GitHub at runtime; inlined here so\n"
     "-- the script carries its own pathfinding. Ember is still fetched at runtime, just above.\n"
 )
 

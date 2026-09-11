@@ -57,7 +57,7 @@ local function fetchLib(name, url, accept)
 end
 
 local Ember = fetchLib("ember", "https://rbx.lol/ember.lua", function(lib) return type(lib.new) == "function" end)
--- UniversalNav, the navigation framework. Normally fetched from rbx.lol/nav.lua; inlined here so
+-- UniversalNav, the navigation framework. Normally fetched from GitHub at runtime; inlined here so
 -- the script carries its own pathfinding. Ember is still fetched at runtime, just above.
 local UniversalNav = (function()
 --!native
