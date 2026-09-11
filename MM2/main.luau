@@ -472,13 +472,36 @@ function danger.offMap(who)
 	return not insideBox(root.Position, box.cf, box.size, 4)
 end
 
+function danger.onMap(who)
+	local map, root = getMap(), hitPartOf(who)
+	if not map or not root then return false end
+	if danger.lobbyHas(root.Position) then return false end
+	local box = boundsOf(map)
+	return insideBox(root.Position, box.cf, box.size, 150)
+end
+
+function danger.cheaters()
+	local out = {}
+	local data = roleData()
+	for _, who in Players:GetPlayers() do
+		if who ~= player and data[who.Name] and not isDead(who) and not danger.friend(who) and danger.offMap(who) then
+			local c = who.Character
+			local hum = c and c:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				table.insert(out, { player = who, role = roleOf(who) })
+			end
+		end
+	end
+	return out
+end
+
 local function aliveTargets()
 	local out = {}
 	local root = myRoot()
 	if not root then return out end
 	local data = roleData()
 	for _, who in Players:GetPlayers() do
-		if who ~= player and data[who.Name] and not isDead(who) and not danger.friend(who) then
+		if who ~= player and data[who.Name] and not isDead(who) and not danger.friend(who) and danger.onMap(who) then
 			local c = who.Character
 			local r = c and c:FindFirstChild("HumanoidRootPart")
 			local hum = c and c:FindFirstChildOfClass("Humanoid")
@@ -2989,8 +3012,8 @@ function sniper.hvh(now)
 	if not state.hvh or sniper.busy or now - (sniper.hvhAt or 0) < 1 then return end
 	local knife, gun = findTool("Knife"), findTool("Gun")
 	if not knife and not gun then return end
-	for _, e in aliveTargets() do
-		if danger.offMap(e.player) and (knife or e.role == "Murderer") then
+	for _, e in danger.cheaters() do
+		if knife or e.role == "Murderer" then
 			sniper.hvhAt = now
 			sniper.busy = true
 			task.spawn(function()
@@ -4415,6 +4438,7 @@ mapSec:Toggle({
 
 mapSec:Toggle({
 	Text = "Auto collect coins",
+	Description = "Walks the map collecting coins, and keeps wandering with the pathfinder when none are in reach.",
 	Icon = "zap",
 	RevertOnClose = true,
 	Callback = function(on)
