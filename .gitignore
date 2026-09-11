@@ -1,0 +1,14 @@
+# This repo holds the MM2 script and the UniversalNav library only. Everything else in this
+# working directory belongs to other projects and is deliberately not published.
+*
+!.gitignore
+!README.md
+
+!nav/
+!nav/UniversalNav.luau
+
+!MM2/
+!MM2/main.luau
+!MM2/mm2-standalone.lua
+!MM2/build-standalone.py
+!MM2/showcase.luau
