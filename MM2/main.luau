@@ -3802,7 +3802,20 @@ end
 
 local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {} }
 
+esp.tint = {
+	coin = COIN_COLOUR,
+	gunFill = ROLE_COLOURS.Sheriff,
+	gunEdge = Color3.fromRGB(200, 225, 255),
+	bodyFill = Color3.fromRGB(235, 235, 245),
+	bodyEdge = Color3.fromRGB(255, 255, 255),
+}
+
 esp.notBody = {}
+
+function esp.repaintRoles()
+	esp.clearLimbs(esp.highlights)
+	clearMap(esp.nameTags)
+end
 
 function esp.dropLimbs(set)
 	for _, hl in pairs(set.parts) do hl:Destroy() end
@@ -3950,8 +3963,8 @@ function esp.refreshBodies()
 				local hl = Instance.new("Highlight")
 				hl.Name = "MM2BodyEsp"
 				hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-				hl.FillColor = Color3.fromRGB(235, 235, 245)
-				hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+				hl.FillColor = esp.tint.bodyFill
+				hl.OutlineColor = esp.tint.bodyEdge
 				hl.FillTransparency = 0.7
 				hl.OutlineTransparency = 0.1
 				hl.Adornee = body
@@ -3986,7 +3999,7 @@ local function adornGun(part, colour)
 	hl.Name = "MM2GunEsp"
 	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	hl.FillColor = colour
-	hl.OutlineColor = Color3.fromRGB(200, 225, 255)
+	hl.OutlineColor = esp.tint.gunEdge
 	hl.FillTransparency = 0.3
 	hl.OutlineTransparency = 0
 	hl.Adornee = part
@@ -4013,7 +4026,7 @@ local function refreshCoinEsp()
 		clearMap(esp.coinBoxes)
 		return
 	end
-	syncBoxes(esp.coinBoxes, coinParts(), COIN_COLOUR, adornCoin)
+	syncBoxes(esp.coinBoxes, coinParts(), esp.tint.coin, adornCoin)
 end
 
 local function refreshGunEsp()
@@ -4023,7 +4036,7 @@ local function refreshGunEsp()
 	end
 	local guns = droppedGuns()
 	for _, held in danger.heldGuns() do table.insert(guns, held) end
-	syncBoxes(esp.gunBoxes, guns, ROLE_COLOURS.Sheriff, adornGun)
+	syncBoxes(esp.gunBoxes, guns, esp.tint.gunFill, adornGun)
 end
 
 local function teleportToGameMap()
@@ -4832,6 +4845,86 @@ espSec:Toggle({
 		local changed = flip("coinEsp", on)
 		refreshCoinEsp()
 		if changed then say(on and "Coin ESP on" or "Coin ESP off", "circle-dollar-sign", on and "accent" or "muted") end
+	end,
+})
+
+ui.colourSec = espSec:Group({ Text = "Colours", Icon = "palette" })
+
+ui.colourSec:ColorPicker({
+	Text = "Murderer",
+	Description = "Role ESP colour for the murderer.",
+	Icon = "skull",
+	Default = ROLE_COLOURS.Murderer,
+	Save = prefs.key("esp", "tintMurderer"),
+	Callback = function(colour)
+		ROLE_COLOURS.Murderer = colour
+		esp.repaintRoles()
+	end,
+})
+
+ui.colourSec:ColorPicker({
+	Text = "Sheriff",
+	Description = "Role ESP colour for the sheriff and the hero.",
+	Icon = "shield",
+	Default = ROLE_COLOURS.Sheriff,
+	Save = prefs.key("esp", "tintSheriff"),
+	Callback = function(colour)
+		ROLE_COLOURS.Sheriff = colour
+		ROLE_COLOURS.Hero = colour
+		esp.repaintRoles()
+	end,
+})
+
+ui.colourSec:ColorPicker({
+	Text = "Innocent",
+	Description = "Role ESP colour for innocents.",
+	Icon = "user",
+	Default = ROLE_COLOURS.Innocent,
+	Save = prefs.key("esp", "tintInnocent"),
+	Callback = function(colour)
+		ROLE_COLOURS.Innocent = colour
+		esp.repaintRoles()
+	end,
+})
+
+ui.colourSec:ColorPicker({
+	Text = "Dead bodies",
+	Description = "Highlight colour for corpses.",
+	Icon = "skull",
+	Default = esp.tint.bodyFill,
+	Save = prefs.key("esp", "tintBody"),
+	Callback = function(colour)
+		esp.tint.bodyFill = colour
+		esp.tint.bodyEdge = colour
+		clearMap(esp.bodies)
+		esp.refreshBodies()
+	end,
+})
+
+ui.colourSec:ColorPicker({
+	Text = "Guns",
+	Description = "Highlight colour for dropped and carried guns.",
+	Icon = "package",
+	Default = esp.tint.gunFill,
+	Save = prefs.key("esp", "tintGun"),
+	Callback = function(colour)
+		esp.tint.gunFill = colour
+		esp.tint.gunEdge = colour
+		clearMap(esp.gunBoxes)
+		refreshGunEsp()
+	end,
+})
+
+ui.colourSec:ColorPicker({
+	Text = "Coins",
+	Description = "Marker colour for coins.",
+	Icon = "circle-dollar-sign",
+	Default = esp.tint.coin,
+	Save = prefs.key("esp", "tintCoin"),
+	Callback = function(colour)
+		esp.tint.coin = colour
+		clearMap(esp.coinBoxes)
+		refreshCoinEsp()
 	end,
 })
 
