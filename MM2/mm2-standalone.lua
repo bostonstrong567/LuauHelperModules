@@ -3177,6 +3177,57 @@ function danger.gap(from, threat)
 	return gap
 end
 
+function danger.sees(from, threat)
+	if not threat or not threat.Parent then return false end
+	local rp = danger.rayIgnoring({ myChar(), threat.Parent })
+	rp.RespectCanCollide = true
+	local eye = threat.Position + Vector3.new(0, 1.5, 0)
+	for _, lift in { 1.5, 0, 3 } do
+		if not Workspace:Raycast(eye, from + Vector3.new(0, lift, 0) - eye, rp) then return true end
+	end
+	return false
+end
+
+function danger.reach()
+	local seen = danger.throwSeen
+	if not seen or seen <= 0 then return THROW_REACH end
+	return math.clamp(seen * 1.15, KNIFE_REACH + 6, 250)
+end
+
+function danger.sawThrow(at)
+	local me = myRoot()
+	if not me or not at then return end
+	local span = (at - me.Position).Magnitude
+	if span < KNIFE_REACH or span > 400 then return end
+	local seen = danger.throwSeen
+	danger.throwSeen = seen and math.max(seen * 0.7 + span * 0.3, span) or span
+end
+
+function danger.watchThrows()
+	if danger.throwHooked then return end
+	local ok, svc = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("ClientServices", 5):WaitForChild("WeaponService", 5))
+	end)
+	local signal = ok and svc and rawget(svc, "KnifeThrown")
+	if not signal then return end
+	local fine, conn = pcall(function()
+		return signal:Connect(function()
+			local foe = danger.foe()
+			if foe then danger.sawThrow(foe.Position) end
+		end)
+	end)
+	if fine and conn then danger.throwHooked = true end
+end
+
+function danger.dangerous(threat)
+	local me = myRoot()
+	if not me or not threat then return false end
+	local span = danger.gap(me.Position, threat)
+	if span < KNIFE_REACH + 8 then return true end
+	if not danger.sees(me.Position, threat) then return false end
+	return span < danger.reach()
+end
+
 function danger.heading(threat)
 	local v = threat.AssemblyLinearVelocity
 	local flat = Vector3.new(v.X, 0, v.Z)
@@ -5568,7 +5619,22 @@ local function rethinkCoin()
 	end
 end
 
-local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {} }
+local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {}, masks = setmetatable({}, { __mode = "k" }) }
+
+function esp.mask(char)
+	for _, thing in char:GetChildren() do
+		local weapon = thing:IsA("Tool") or (thing:IsA("Model") and thing:GetAttribute("IsWeapon") ~= nil)
+		if weapon and not esp.masks[thing] then
+			local blank = Instance.new("Highlight")
+			blank.Name = "MM2Mask"
+			blank.Adornee = thing
+			blank.FillTransparency = 1
+			blank.OutlineTransparency = 1
+			blank.Parent = thing
+			esp.masks[thing] = blank
+		end
+	end
+end
 
 function danger.corpseOf(body)
 	local hum = body:FindFirstChildOfClass("Humanoid")
@@ -5649,6 +5715,7 @@ local function refreshRoleEsp()
 				hl.Parent = char
 				esp.highlights[who] = hl
 			end
+			esp.mask(char)
 			local colour = ROLE_COLOURS[role] or Color3.new(1, 1, 1)
 			hl.FillColor = colour
 			hl.OutlineColor = colour
@@ -7404,6 +7471,7 @@ win:Track(RunService.Heartbeat:Connect(function()
 	if now - T.tick >= 1 then
 		local delta = now - T.tick
 		T.tick = now
+		danger.watchThrows()
 		local liveMap = getMap()
 		if liveMap ~= nav.map and now - T.navFix > 5 then
 			T.navFix = now
@@ -7474,7 +7542,7 @@ win:Track(RunService.Heartbeat:Connect(function()
 			local toThem = danger.flat(threat.Position, root.Position)
 			closing = toThem.Magnitude < 45 and toThem.Magnitude > 0.01 and toThem.Unit:Dot(coinRun.moveDir) > 0.75 and math.abs(threat.Position.Y - root.Position.Y) < 6 and danger.gap(root.Position, threat) < 50
 		end
-		if threat and root and (danger.gap(root.Position, threat) < danger.near or closing) then
+		if threat and root and (closing or danger.dangerous(threat)) then
 			task.spawn(function()
 				local okFlee, err = pcall(danger.flee, threat)
 				if not okFlee then
