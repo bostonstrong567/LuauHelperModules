@@ -1947,6 +1947,7 @@ local ROLE_COLOURS = {
 
 local COIN_COLOUR = Color3.fromRGB(255, 200, 40)
 local KNIFE_REACH = 12
+local THROW_REACH = 70
 local AIM_FOV_MAX = 800
 local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
@@ -2328,13 +2329,45 @@ function danger.offMap(who)
 	return not insideBox(root.Position, box.cf, box.size, 4)
 end
 
+function danger.onMap(who)
+	local map, root = getMap(), hitPartOf(who)
+	if not map or not root then return false end
+	if danger.lobbyHas(root.Position) then return false end
+	local box = boundsOf(map)
+	return insideBox(root.Position, box.cf, box.size, 150)
+end
+
+function danger.knifeNear()
+	if findTool("Knife") then return false end
+	local who = findByRole("Murderer")
+	if not who or who == player or isDead(who) then return false end
+	local part, me = hitPartOf(who), myRoot()
+	if not part or not me then return false end
+	return (part.Position - me.Position).Magnitude < THROW_REACH
+end
+
+function danger.cheaters()
+	local out = {}
+	local data = roleData()
+	for _, who in Players:GetPlayers() do
+		if who ~= player and data[who.Name] and not isDead(who) and not danger.friend(who) and danger.offMap(who) then
+			local c = who.Character
+			local hum = c and c:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				table.insert(out, { player = who, role = roleOf(who) })
+			end
+		end
+	end
+	return out
+end
+
 local function aliveTargets()
 	local out = {}
 	local root = myRoot()
 	if not root then return out end
 	local data = roleData()
 	for _, who in Players:GetPlayers() do
-		if who ~= player and data[who.Name] and not isDead(who) and not danger.friend(who) then
+		if who ~= player and data[who.Name] and not isDead(who) and not danger.friend(who) and danger.onMap(who) then
 			local c = who.Character
 			local r = c and c:FindFirstChild("HumanoidRootPart")
 			local hum = c and c:FindFirstChildOfClass("Humanoid")
@@ -2771,7 +2804,7 @@ local function shootTarget(entry)
 	return true
 end
 
-local sniper = { busy = false, blockedSince = nil, close = 22, hold = 34, far = 80, reach = 45, label = nil, labelAt = 0, noPath = {} }
+local sniper = { busy = false, blockedSince = nil, close = 30, hold = 48, far = 80, reach = 45, label = nil, labelAt = 0, noPath = {} }
 
 local function sniperTick(now)
 	local target
@@ -3321,13 +3354,14 @@ end
 
 local lastHop = 0
 
-local function jumpNow()
+local function jumpNow(force)
 	local now = os.clock()
 	if now - lastHop < 0.6 then return end
 	local hum = myHumanoid()
 	if not hum then return end
 	local st = hum:GetState()
 	if st == Enum.HumanoidStateType.Freefall or st == Enum.HumanoidStateType.Jumping then return end
+	if not force and danger.knifeNear() then return end
 	lastHop = now
 	hum:ChangeState(Enum.HumanoidStateType.Jumping)
 end
@@ -3484,7 +3518,7 @@ local function travel(run, points, hum)
 		if wp.Action == Enum.PathWaypointAction.Jump then
 			local r = myRoot()
 			if r then
-				jumpNow()
+				jumpNow(true)
 			end
 		end
 
@@ -4845,8 +4879,8 @@ function sniper.hvh(now)
 	if not state.hvh or sniper.busy or now - (sniper.hvhAt or 0) < 1 then return end
 	local knife, gun = findTool("Knife"), findTool("Gun")
 	if not knife and not gun then return end
-	for _, e in aliveTargets() do
-		if danger.offMap(e.player) and (knife or e.role == "Murderer") then
+	for _, e in danger.cheaters() do
+		if knife or e.role == "Murderer" then
 			sniper.hvhAt = now
 			sniper.busy = true
 			task.spawn(function()
@@ -6271,6 +6305,7 @@ mapSec:Toggle({
 
 mapSec:Toggle({
 	Text = "Auto collect coins",
+	Description = "Walks the map collecting coins, and keeps wandering with the pathfinder when none are in reach.",
 	Icon = "zap",
 	RevertOnClose = true,
 	Callback = function(on)
