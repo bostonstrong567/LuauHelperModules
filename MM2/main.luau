@@ -1359,21 +1359,29 @@ function danger.watchThrows()
 	if fine and conn then danger.throwHooked = true end
 end
 
-function danger.untouchable(on)
-	local char = myChar()
-	if not char then return end
-	for _, part in char:GetDescendants() do
-		if part:IsA("BasePart") then
-			if on then
-				if danger.touchWas[part] == nil then danger.touchWas[part] = part.CanTouch end
-				part.CanTouch = false
-			else
-				local was = danger.touchWas[part]
-				part.CanTouch = was == nil or was
-			end
-		end
+function danger.knifeHandles()
+	local out = {}
+	for _, who in Players:GetPlayers() do
+		local char = who ~= player and who.Character
+		local knife = char and char:FindFirstChild("Knife")
+		local handle = knife and knife:FindFirstChild("Handle")
+		if handle and handle:IsA("BasePart") then table.insert(out, handle) end
 	end
-	if not on then table.clear(danger.touchWas) end
+	return out
+end
+
+function danger.untouchable(on)
+	if on then
+		for _, handle in danger.knifeHandles() do
+			if danger.touchWas[handle] == nil then danger.touchWas[handle] = handle.CanTouch end
+			handle.CanTouch = false
+		end
+		return
+	end
+	for handle, was in pairs(danger.touchWas) do
+		if handle.Parent then handle.CanTouch = was end
+	end
+	table.clear(danger.touchWas)
 end
 
 function danger.guardTouch()
@@ -4256,7 +4264,7 @@ combatSec:Toggle({
 
 combatSec:Toggle({
 	Text = "Block stabs",
-	Description = "Turns off CanTouch on your own body, so the murderer's knife never fires its Touched handler against you. Thrown knives and guns still hit.",
+	Description = "Turns off CanTouch on every other player's knife handle, so its Touched handler never fires against you. Your own body stays touchable, so coins still collect. Thrown knives and guns still hit.",
 	Icon = "shield-ban",
 	Save = prefs.key("combat", "noStab"),
 	Callback = function(on)
