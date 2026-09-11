@@ -3234,7 +3234,7 @@ end
 
 function danger.guardTouch()
 	if not state.noStab then
-		if danger.touchOff then
+		if danger.touchOff or next(danger.touchWas) ~= nil then
 			danger.untouchable(false)
 			danger.touchOff = false
 		end
@@ -5646,6 +5646,20 @@ end
 
 local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {} }
 
+esp.notBody = {}
+
+function esp.dropLimbs(set)
+	for _, hl in pairs(set.parts) do hl:Destroy() end
+	table.clear(set.parts)
+end
+
+function esp.clearLimbs(store)
+	for who, set in pairs(store) do
+		esp.dropLimbs(set)
+		store[who] = nil
+	end
+end
+
 function danger.corpseOf(body)
 	local hum = body:FindFirstChildOfClass("Humanoid")
 	if not hum or hum.Health > 0 then return false end
@@ -5697,7 +5711,7 @@ end
 
 local function refreshRoleEsp()
 	if not state.roleEsp then
-		clearMap(esp.highlights)
+		esp.clearLimbs(esp.highlights)
 		clearMap(esp.nameTags)
 		return
 	end
@@ -5715,29 +5729,47 @@ local function refreshRoleEsp()
 		end
 		if role and char.Parent and not spectating and (not dead or state.showDead) then
 			keep[who] = true
-			local hl = esp.highlights[who]
-			if not hl or hl.Adornee ~= char then
-				if hl then hl:Destroy() end
-				hl = Instance.new("Highlight")
-				hl.Name = "MM2RoleEsp"
-				hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-				hl.Adornee = char
-				hl.Parent = char
-				esp.highlights[who] = hl
+			local set = esp.highlights[who]
+			if not set or set.char ~= char then
+				if set then
+					for _, old in set.parts do old:Destroy() end
+				end
+				set = { char = char, parts = {} }
+				esp.highlights[who] = set
 			end
 			local colour = ROLE_COLOURS[role] or Color3.new(1, 1, 1)
-			hl.FillColor = colour
-			hl.OutlineColor = colour
-			hl.FillTransparency = dead and 0.85 or 0.55
-			hl.OutlineTransparency = 0
+			local fill = dead and 0.85 or 0.55
+			for _, limb in char:GetChildren() do
+				if limb:IsA("BasePart") and not esp.notBody[limb.Name] then
+					local hl = set.parts[limb]
+					if not hl or hl.Parent ~= limb then
+						hl = Instance.new("Highlight")
+						hl.Name = "MM2RoleEsp"
+						hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+						hl.Adornee = limb
+						hl.Parent = limb
+						set.parts[limb] = hl
+					end
+					hl.FillColor = colour
+					hl.OutlineColor = colour
+					hl.FillTransparency = fill
+					hl.OutlineTransparency = 0
+				end
+			end
+			for limb, hl in pairs(set.parts) do
+				if limb.Parent ~= char then
+					hl:Destroy()
+					set.parts[limb] = nil
+				end
+			end
 			if state.nameEsp then
 				updateNameTag(who, char, dead and (role .. " (dead)") or role, colour)
 			end
 		end
 	end
-	for who, hl in pairs(esp.highlights) do
+	for who, set in pairs(esp.highlights) do
 		if not keep[who] then
-			hl:Destroy()
+			esp.dropLimbs(set)
 			esp.highlights[who] = nil
 		end
 	end
@@ -7462,7 +7494,7 @@ win:Track(Players.PlayerRemoving:Connect(function(who)
 		esp.charConns[who] = nil
 	end
 	if esp.highlights[who] then
-		esp.highlights[who]:Destroy()
+		esp.dropLimbs(esp.highlights[who])
 		esp.highlights[who] = nil
 	end
 	if esp.nameTags[who] then
@@ -7620,7 +7652,7 @@ win:OnDestroy(function()
 	table.clear(charConns)
 	clearCircle()
 	forgetCoinHooks()
-	clearMap(esp.highlights)
+	esp.clearLimbs(esp.highlights)
 	clearMap(esp.nameTags)
 	clearMap(esp.coinBoxes)
 	clearMap(esp.gunBoxes)
