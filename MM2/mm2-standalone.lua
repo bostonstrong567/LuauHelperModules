@@ -3210,11 +3210,13 @@ function danger.watchThrows()
 	end)
 	local signal = ok and svc and rawget(svc, "KnifeThrown")
 	if not signal then return end
+	local function heard()
+		local foe = danger.foe()
+		if foe then danger.sawThrow(foe.Position) end
+	end
 	local fine, conn = pcall(function()
-		return signal:Connect(function()
-			local foe = danger.foe()
-			if foe then danger.sawThrow(foe.Position) end
-		end)
+		if typeof(signal) == "Instance" then return signal.Event:Connect(heard) end
+		return signal:Connect(heard)
 	end)
 	if fine and conn then danger.throwHooked = true end
 end
