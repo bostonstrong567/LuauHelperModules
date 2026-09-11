@@ -532,6 +532,10 @@ end
 
 ---------------------------------------------------------------------------------------------- Status
 -- Status bar text and notifications.
+for _, old in (gethui and gethui() or game:GetService("CoreGui")):GetChildren() do
+	if old:IsA("ScreenGui") and (old.Name == "rbxlolhub" or old.Name == "MM2Fov") then old:Destroy() end
+end
+
 local win = Ember.new({
 	Name = "rbxlolhub",
 	Title = "RBX.lol Hub",
@@ -4769,7 +4773,7 @@ plrSec:Toggle({
 	end,
 })
 
-local espSec = win:Section("Visuals", "eye")
+local espSec = win:Section("Esp", "eye")
 espSec:Title({ Text = "ESP", Icon = "eye" })
 
 espSec:Toggle({
