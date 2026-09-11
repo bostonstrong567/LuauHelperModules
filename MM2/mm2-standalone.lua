@@ -2147,6 +2147,17 @@ local CLAIM_WINDOW = 2.5
 local COIN_SWITCH_RATIO = 0.7
 local COIN_RETHINK = 0.5
 local danger = { near = 40, safe = 60, beenTo = {}, fleeing = false, brainOn = false, friends = {}, badGoals = {}, traps = {}, trapHits = {}, pathLen = math.huge, pathAt = 0, pathFor = nil, routing = false }
+function danger.rayIgnoring(list)
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+	rp.FilterDescendantsInstances = list
+	return rp
+end
+
+function danger.flat(a, b)
+	return Vector3.new(a.X - b.X, 0, a.Z - b.Z)
+end
+
 local STALL_SECONDS = 0.4
 local TOTALS_KEY = "mm2_totals"
 
@@ -2684,10 +2695,7 @@ end
 ------------------------------------------------------------------------------------------------- Aim
 -- Gun aiming. One cooldown owner, and points led by ping so the server's trace agrees.
 local function excludeMe()
-	local rp = RaycastParams.new()
-	rp.FilterType = Enum.RaycastFilterType.Exclude
-	rp.FilterDescendantsInstances = { myChar() }
-	return rp
+	return danger.rayIgnoring({ myChar() })
 end
 
 local function aimParams()
@@ -3255,9 +3263,7 @@ function danger.gap(from, threat)
 		if threat.Position.Y > from.Y - 2 and dy < 40 then
 			gap = math.min(gap, flat + dy * 0.5)
 		elseif flat < 60 and dy < 8 then
-			local rp = RaycastParams.new()
-			rp.FilterType = Enum.RaycastFilterType.Exclude
-			rp.FilterDescendantsInstances = { myChar(), threat.Parent }
+			local rp = danger.rayIgnoring({ myChar(), threat.Parent })
 			if not Workspace:Raycast(threat.Position, from + Vector3.new(0, 1, 0) - threat.Position, rp) then
 				gap = math.min(gap, flat)
 			end
@@ -3267,9 +3273,7 @@ function danger.gap(from, threat)
 	if dy < 6 then return flat end
 	if threat.Position.Y > from.Y - 2 and dy < 40 then return flat + dy * 0.5 end
 	local gap = flat + dy * 3
-	local rp = RaycastParams.new()
-	rp.FilterType = Enum.RaycastFilterType.Exclude
-	rp.FilterDescendantsInstances = { myChar(), threat.Parent }
+	local rp = danger.rayIgnoring({ myChar(), threat.Parent })
 	if Workspace:Raycast(threat.Position, -delta, rp) then gap += 40 end
 	return gap
 end
@@ -3314,7 +3318,7 @@ function danger.pathGap(from, to, threat)
 end
 
 function danger.closeBy(from, threat, within)
-	local flat = Vector3.new(threat.Position.X - from.X, 0, threat.Position.Z - from.Z).Magnitude
+	local flat = danger.flat(threat.Position, from).Magnitude
 	local dy = math.abs(threat.Position.Y - from.Y)
 	local above = threat.Position.Y > from.Y - 2 and dy < 40
 	return flat < within and (dy < 10 or above or (dy < 20 and flat < within * 0.5))
@@ -3326,7 +3330,7 @@ local function nearestCoin(from, now)
 	local parts = coinParts()
 	local minGap = danger.safe
 	local ourGap = threat and danger.gap(from, threat) or math.huge
-	local toThreat = threat and Vector3.new(threat.Position.X - from.X, 0, threat.Position.Z - from.Z) or Vector3.zero
+	local toThreat = threat and danger.flat(threat.Position, from) or Vector3.zero
 	for _, part in parts do
 		local until_ = coin.skipped[part]
 		if not until_ or until_ < now then
@@ -3339,10 +3343,10 @@ local function nearestCoin(from, now)
 			if danger.lethal(part.Position, 12) then score = nil end
 			if score and threat then
 				local gap = danger.gap(part.Position, threat)
-				local toCoin = Vector3.new(part.Position.X - from.X, 0, part.Position.Z - from.Z)
+				local toCoin = danger.flat(part.Position, from)
 				local towardThem = toCoin.Magnitude > 1 and toThreat.Magnitude > 0.01 and toCoin.Unit:Dot(toThreat.Unit) > 0.5 and gap < math.max(ourGap, 50)
 				local ahead = danger.ahead(threat)
-				local inHisWay = math.abs(threat.Position.Y - part.Position.Y) < 8 and Vector3.new(ahead.X - part.Position.X, 0, ahead.Z - part.Position.Z).Magnitude < 40
+				local inHisWay = math.abs(threat.Position.Y - part.Position.Y) < 8 and danger.flat(ahead, part.Position).Magnitude < 40
 				if gap < minGap or towardThem or inHisWay or danger.pathGap(from, part.Position, threat) < 26 then
 					score = nil
 				elseif gap < 60 then
@@ -3671,7 +3675,7 @@ local function travel(run, points, hum)
 			if state.autoCoin and not coin.bagFull then coin.sweep(root) end
 			local speed = math.clamp(run.speed or state.coinSpeed, 16, 25)
 			local here = root.Position
-			local flat = Vector3.new(target.X - here.X, 0, target.Z - here.Z).Magnitude
+			local flat = danger.flat(target, here).Magnitude
 			local dy = target.Y - here.Y
 			local dt = RunService.Heartbeat:Wait()
 			local step = math.max(1, speed * dt * 1.5)
@@ -3706,7 +3710,7 @@ local function travel(run, points, hum)
 					run.leg = i
 					target = wp.Position + Vector3.new(0, 1.5, 0)
 					final = i == last
-					flat = Vector3.new(target.X - here.X, 0, target.Z - here.Z).Magnitude
+					flat = danger.flat(target, here).Magnitude
 					dy = target.Y - here.Y
 					bestFlat, bestAt = flat, now
 				end
@@ -3716,13 +3720,13 @@ local function travel(run, points, hum)
 				closing = closing or now
 				if run.moveDir then
 					goal = here + run.moveDir * 6
-					if Vector3.new(target.X - here.X, 0, target.Z - here.Z):Dot(run.moveDir) < 0 then break end
+					if danger.flat(target, here):Dot(run.moveDir) < 0 then break end
 				end
 				if now - closing > 0.4 then break end
 			end
 			local climb = climbLeg and dy > 2
 			if flat > 3 and not climb then
-				local ahead = Vector3.new(goal.X - here.X, 0, goal.Z - here.Z)
+				local ahead = danger.flat(goal, here)
 				if ahead.Magnitude > 0.01 then
 					local bent, hop, wall = danger.steerClear(root, ahead.Unit, fix)
 					if wall and not lineIsClear(here, target) and now - bestAt > 0.5 then
@@ -3766,7 +3770,7 @@ local function travel(run, points, hum)
 				fix.stalled += dt
 			end
 
-			local flatNow = Vector3.new(target.X - root.Position.X, 0, target.Z - root.Position.Z).Magnitude
+			local flatNow = danger.flat(target, root.Position).Magnitude
 			local moved = lastFlat and (lastFlat - flatNow) or speed * dt
 			if hum:GetState() == Enum.HumanoidStateType.Climbing then
 				moved = (lastPos and root.Position.Y - lastPos.Y > 0.05) and speed * dt or 0
@@ -3970,7 +3974,7 @@ function danger.steerClear(root, dir, fix)
 	local from = root.Position - Vector3.new(0, 3 - lift, 0)
 	local ctx = { Agent = nav.agent, Geometry = nav.world.geometry, World = nav.world }
 	fix.memo = fix.memo or {}
-	local bent, room, blocker = UniversalNav.Steering.Heading(from, dir, ctx, fix.memo)
+	local bent, _, blocker = UniversalNav.Steering.Heading(from, dir, ctx, fix.memo)
 	if bent == dir then return dir, false, false end
 	fix.wallHit = blocker
 	local knee = Workspace:Raycast(root.Position + Vector3.new(0, -2, 0), dir * 3, excludeMe())
@@ -3996,8 +4000,8 @@ function nav.costFor(him, me, careful)
 			if him then
 				local p = t.To.Position
 				if math.abs(p.Y - him.Y) < 10 then
-					local his = Vector3.new(p.X - him.X, 0, p.Z - him.Z).Magnitude
-					if his < 30 and his < Vector3.new(p.X - me.X, 0, p.Z - me.Z).Magnitude then cost += 4 end
+					local his = danger.flat(p, him).Magnitude
+					if his < 30 and his < danger.flat(p, me).Magnitude then cost += 4 end
 				end
 			end
 			return cost
@@ -4374,7 +4378,7 @@ function danger.openDir(root, threat)
 	local rp = excludeMe()
 	if threat and threat.Parent then rp.FilterDescendantsInstances = { myChar(), threat.Parent } end
 	rp.RespectCanCollide = true
-	local toThem = threat and Vector3.new(threat.Position.X - here.X, 0, threat.Position.Z - here.Z)
+	local toThem = threat and danger.flat(threat.Position, here)
 	toThem = toThem and toThem.Magnitude > 0.01 and toThem.Unit or nil
 	local best, bestFree
 	for turn = 0, 330, 30 do
@@ -4392,7 +4396,7 @@ end
 function danger.breakout(root, threat)
 	local here = root.Position
 	local from = danger.threatFrom(here, threat)
-	local away = Vector3.new(here.X - from.X, 0, here.Z - from.Z)
+	local away = danger.flat(here, from)
 	local dist = away.Magnitude
 	away = dist > 0.01 and away / dist or root.CFrame.LookVector
 	local rp = excludeMe()
@@ -4528,7 +4532,7 @@ function danger.fleeLegs(root, threat)
 			local score = math.min(his, 120) + math.min(run, 80) * 0.8
 			if his < math.max(mine, danger.safe) then score -= 60 end
 			if his / 18 < run / math.max(state.coinSpeed or 22, 16) + 0.5 then score -= 80 end
-			local hisWay = Vector3.new(p.X - threat.Position.X, 0, p.Z - threat.Position.Z)
+			local hisWay = danger.flat(p, threat.Position)
 			if heading and hisWay.Magnitude > 1 then score -= 40 * math.max(0, heading:Dot(hisWay.Unit)) end
 			local worst = best[#best]
 			if #best < 8 or score > worst.score then
@@ -4574,7 +4578,7 @@ function danger.flee(threat)
 			local root = myRoot()
 			if not run.active or not root or not threat.Parent then break end
 			if danger.gap(root.Position, threat) > danger.safe then break end
-			local legs, legsGoal = danger.fleeLegs(root, threat)
+			local legs = danger.fleeLegs(root, threat)
 			if not legs then
 				danger.fleeSkipUntil = os.clock() + 1
 				break
@@ -4632,7 +4636,7 @@ function danger.roamLegs(root, threatRoot)
 			Blocked = nav.blocked,
 			Score = function(state)
 				local p = state.Position
-				local run = Vector3.new(p.X - here.X, 0, p.Z - here.Z).Magnitude
+				local run = danger.flat(p, here).Magnitude
 				if run < 25 or run > 250 then return nil end
 				if (danger.badGoals[danger.goalKey(p)] or 0) > now then return nil end
 				if danger.lethal(p, 12) then return nil end
@@ -4836,7 +4840,7 @@ function danger.brain()
 			if not away then
 				jumpNow()
 				local from = danger.threatFrom(root.Position, threat)
-				local out = Vector3.new(root.Position.X - from.X, 0, root.Position.Z - from.Z)
+				local out = danger.flat(root.Position, from)
 				away = out.Magnitude > 0.01 and out.Unit or root.CFrame.LookVector
 			end
 			danger.push(run, root, away)
@@ -5143,7 +5147,7 @@ function vote.stepOff(board)
 	if not root then return end
 	for _, entry in board do
 		local det = entry.detector
-		local flat = Vector3.new(det.Position.X - root.Position.X, 0, det.Position.Z - root.Position.Z)
+		local flat = danger.flat(det.Position, root.Position)
 		if flat.Magnitude < 4.5 then
 			vote.walking = true
 			stopCoinRun()
@@ -5283,7 +5287,7 @@ function sniper.steer(run, hum, goal, label)
 	while run.active do
 		local root = myRoot()
 		if not root then return end
-		if Vector3.new(goal.X - root.Position.X, 0, goal.Z - root.Position.Z).Magnitude < 1.5 then return end
+		if danger.flat(goal, root.Position).Magnitude < 1.5 then return end
 		local speed = math.clamp(run.speed or state.coinSpeed, 16, 25)
 		drive(run, root, hum, goal, speed)
 		local dt = RunService.Heartbeat:Wait()
@@ -5338,7 +5342,7 @@ function sniper.strafeSpot(here, toward, entry, gunOff, who, scale)
 	local hereFloor = danger.floorAt(here.X, here.Y + 2, here.Z)
 	for _, off in { { 4, 0 }, { -4, 0 }, { 0, -5 }, { 8, 0 }, { -8, 0 }, { 6, -5 }, { -6, -5 }, { 6, 5 }, { -6, 5 }, { 12, 0 }, { -12, 0 }, { 10, -5 }, { -10, -5 }, { 10, 5 }, { -10, 5 }, { 16, 0 }, { -16, 0 }, { 16, -8 }, { -16, -8 }, { 16, 8 }, { -16, 8 } } do
 		local spot = here + side * (off[1] * scale) + toward * (off[2] * scale)
-		if Vector3.new(them.X - spot.X, 0, them.Z - spot.Z).Magnitude >= sniper.close and spotIsStandable(spot) then
+		if danger.flat(them, spot).Magnitude >= sniper.close and spotIsStandable(spot) then
 			local floor = danger.floorAt(spot.X, spot.Y + 2, spot.Z)
 			if floor and hereFloor and math.abs(floor.Y - hereFloor.Y) < 4 and lineIsClear(here, spot, who.Character) and clearAim(spot + gunOff, entry) then
 				if off[1] < 0 then sniper.side = -(sniper.side or 1) end
@@ -5386,7 +5390,7 @@ function sniper.approach(run, hum, who, blocker)
 			run.retarget = true
 			return
 		end
-		local flat = Vector3.new(t.Position.X - r.Position.X, 0, t.Position.Z - r.Position.Z).Magnitude
+		local flat = danger.flat(t.Position, r.Position).Magnitude
 		if flat < sniper.hold or (t.Position - them).Magnitude > math.max(flat * 0.35, 8) or os.clock() - legAt > 1.5 or clearAim(o.WorldPosition, { player = who, root = t }) then
 			run.retarget = true
 		end
@@ -5416,7 +5420,7 @@ function sniper.vantage(here, entry, gunOff)
 	for _, n in near do
 		local p = n.Position
 		local d = (p - here).Magnitude
-		if d > 4 and Vector3.new(them.X - p.X, 0, them.Z - p.Z).Magnitude >= sniper.close then
+		if d > 4 and danger.flat(them, p).Magnitude >= sniper.close then
 			tested += 1
 			if clearAim(p + gunOff, entry) then return p end
 			if tested >= 120 then break end
@@ -5484,7 +5488,7 @@ function sniper.duel(who, limit)
 		end
 		local entry = { player = who, root = target }
 		local here = root.Position
-		local flat = Vector3.new(target.Position.X - here.X, 0, target.Position.Z - here.Z)
+		local flat = danger.flat(target.Position, here)
 		local dist = flat.Magnitude
 		if math.abs(target.Position.Y - here.Y) > 8 then dist = math.max(dist, sniper.hold) end
 		local toward = dist > 0.01 and flat.Unit or root.CFrame.LookVector
@@ -5627,8 +5631,8 @@ local function rethinkCoin()
 	if not root then return end
 	local threat = danger.root()
 	if threat then
-		local toThem = Vector3.new(threat.Position.X - root.Position.X, 0, threat.Position.Z - root.Position.Z)
-		local toCoin = Vector3.new(run.target.Position.X - root.Position.X, 0, run.target.Position.Z - root.Position.Z)
+		local toThem = danger.flat(threat.Position, root.Position)
+		local toCoin = danger.flat(run.target.Position, root.Position)
 		local coinGap = danger.gap(run.target.Position, threat)
 		if danger.pathGap(root.Position, run.target.Position, threat) < 22
 			or coinGap < danger.near
@@ -7427,7 +7431,7 @@ win:Track(RunService.Heartbeat:Connect(function()
 		local root = myRoot()
 		local closing = false
 		if threat and root and coinRun and coinRun.moveDir then
-			local toThem = Vector3.new(threat.Position.X - root.Position.X, 0, threat.Position.Z - root.Position.Z)
+			local toThem = danger.flat(threat.Position, root.Position)
 			closing = toThem.Magnitude < 45 and toThem.Magnitude > 0.01 and toThem.Unit:Dot(coinRun.moveDir) > 0.75 and math.abs(threat.Position.Y - root.Position.Y) < 6 and danger.gap(root.Position, threat) < 50
 		end
 		if threat and root and (danger.gap(root.Position, threat) < danger.near or closing) then
