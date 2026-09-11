@@ -5201,10 +5201,18 @@ function esp.heatDraw()
 							local link = esp.heatTile(used)
 							local from = (node.Floor or node.Position) + Vector3.new(0, 0.6, 0)
 							local span = to - from
-							link.Size = Vector3.new(0.5, 0.5, math.max(span.Magnitude, 0.5))
-							link.CFrame = CFrame.lookAt(from + span / 2, to)
-							link.Color = Color3.fromRGB(255, 255, 255)
-							link.Transparency = 0.2
+							local reach = span.Magnitude
+							if reach > 0.5 and reach < 40 then
+								link.Size = Vector3.new(0.18, 0.18, reach)
+								link.CFrame = CFrame.lookAt(from + span / 2, to)
+								link.Color = Color3.fromRGB(120, 245, 255)
+								link.Transparency = 0.35
+							else
+								-- degenerate or absurd span: park it out of sight rather than draw a slab
+								link.Size = Vector3.new(0.1, 0.1, 0.1)
+								link.CFrame = CFrame.new(from)
+								link.Transparency = 1
+							end
 						end
 					end
 				end
