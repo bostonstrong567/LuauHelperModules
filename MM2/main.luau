@@ -4983,6 +4983,93 @@ ui.colourSec:ColorPicker({
 	end,
 })
 
+-------------------------------------------------------------------- BEGIN DEBUG HEATMAP (temporary)
+-- Draws the lattice around you, green where the router can reach and red where it cannot.
+-- Everything lives on esp.heat and under one MM2Heat folder, so deleting this fenced block
+-- and the esp.heat teardown line in OnDestroy removes it completely.
+esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0 }
+
+function esp.heatClear()
+	if esp.heat.conn then
+		esp.heat.conn:Disconnect()
+		esp.heat.conn = nil
+	end
+	if esp.heat.folder then
+		esp.heat.folder:Destroy()
+		esp.heat.folder = nil
+	end
+	table.clear(esp.heat.tiles)
+	for _, old in Workspace:GetChildren() do
+		if old.Name == "MM2Heat" then old:Destroy() end
+	end
+end
+
+function esp.heatDraw()
+	local root = myRoot()
+	if not root or not nav.live() then return end
+	local now = os.clock()
+	if now - esp.heat.at < 0.4 then return end
+	esp.heat.at = now
+	if not esp.heat.folder or not esp.heat.folder.Parent then
+		local folder = Instance.new("Folder")
+		folder.Name = "MM2Heat"
+		folder.Parent = Workspace
+		esp.heat.folder = folder
+		table.clear(esp.heat.tiles)
+	end
+	local here = root.Position
+	local nodes = nav.world:Nearby(here, state.heatRange or 90)
+	local shown = {}
+	for i, node in nodes do
+		if i > (state.heatTiles or 260) then break end
+		local tile = esp.heat.tiles[i]
+		if not tile or not tile.Parent then
+			tile = Instance.new("Part")
+			tile.Name = "Tile"
+			tile.Anchored, tile.CanCollide, tile.CanTouch, tile.CanQuery = true, false, false, false
+			tile.Size = Vector3.new(2.4, 0.2, 2.4)
+			tile.Material = Enum.Material.Neon
+			tile.Transparency = 0.4
+			tile.Parent = esp.heat.folder
+			esp.heat.tiles[i] = tile
+		end
+		tile.Position = (node.Floor or node.Position) + Vector3.new(0, 0.25, 0)
+		local okReach, reach = pcall(danger.reachable, here, node.Position)
+		local okRisk, risk = pcall(function() return nav.world:Risk(node) end)
+		risk = okRisk and type(risk) == "number" and risk or 0
+		if okReach and reach then
+			tile.Color = Color3.fromRGB(60, 220, 90):Lerp(Color3.fromRGB(240, 200, 60), math.clamp(risk, 0, 1))
+		else
+			tile.Color = Color3.fromRGB(230, 60, 60)
+		end
+		shown[i] = true
+	end
+	for i, tile in esp.heat.tiles do
+		if not shown[i] then
+			tile:Destroy()
+			esp.heat.tiles[i] = nil
+		end
+	end
+end
+
+espSec:Toggle({
+	Text = "Lattice heatmap",
+	Description = "Debug view of the map's pathfinding lattice. Green means the router can reach that tile, yellow means it costs more, red means it cannot. Temporary, for diagnosing routing.",
+	Icon = "grid-3x3",
+	Callback = function(on)
+		state.heatmap = on
+		if not on then
+			esp.heatClear()
+			return
+		end
+		esp.heat.conn = RunService.Heartbeat:Connect(function()
+			if not state.heatmap then return end
+			pcall(esp.heatDraw)
+		end)
+	end,
+})
+---------------------------------------------------------------------- END DEBUG HEATMAP (temporary)
+
 local statsSec = win:Section("Stats", "activity")
 local S = {}
 statsSec:Title({ Text = "YOUR ROLE", Icon = "user" })
@@ -5958,6 +6045,7 @@ win:OnDestroy(function()
 	clearCircle()
 	forgetCoinHooks()
 	esp.clearLimbs(esp.highlights)
+	esp.heatClear()
 	clearMap(esp.nameTags)
 	clearMap(esp.coinBoxes)
 	clearMap(esp.gunBoxes)
