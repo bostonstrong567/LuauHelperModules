@@ -2122,7 +2122,11 @@ local function coinLoop(run)
 			run.idle = true
 			local waited = 0
 			while run.active and waited < 3 and not nearestCoin(root.Position, os.clock()) do
-				danger.push(run, root, danger.openDir(root, danger.root()) or run.moveDir or root.CFrame.LookVector)
+				if not run.wanderDir or os.clock() > (run.wanderUntil or 0) or not danger.roomAhead(root.Position, run.wanderDir, 4) then
+					run.wanderDir = danger.openDir(root, danger.root()) or run.moveDir or root.CFrame.LookVector
+					run.wanderUntil = os.clock() + 2
+				end
+				danger.push(run, root, run.wanderDir)
 				waited += RunService.Heartbeat:Wait()
 			end
 			run.idle = false
@@ -2234,19 +2238,43 @@ local function grabDroppedGun()
 			run.targetDist = dist
 			local hum = borrowMovement()
 			if not hum then return end
-			local from = myRoot()
-			if not from then return end
-			local legs = legsTo(from.Position, gun.Position)
-			if not legs then return end
-			local watch = RunService.Heartbeat:Connect(function()
-				local r, t = myRoot(), danger.root()
-				if not r or not t then return end
-				if danger.gap(r.Position, t) < 40 or danger.pathGap(r.Position, gun.Position, t) < 25 then run.active = false end
-			end)
-			local outcome = danger.leg(run, legs, hum, watch)
-			run.moveDir = nil
-			grab.cut = outcome == "stopped"
-			if outcome == "arrived" and gunStillThere(gun) then touchGun(gun) end
+			local until_ = os.clock() + 45
+			while run.active and gunStillThere(gun) and os.clock() < until_ do
+				if not canAct() or not legitOn("Walking to the dropped gun") then break end
+				local from = myRoot()
+				if not from then break end
+				local foe = danger.root()
+				local legs = legsTo(from.Position, gun.Position)
+				if legs and foe and not danger.routeSafe(legs, from.Position, foe) then legs = nil end
+				if not legs then
+					if foe and danger.gap(from.Position, foe) < danger.safe then
+						danger.push(run, from, danger.openDir(from, foe) or run.moveDir)
+					else
+						run.moveDir = nil
+						player:Move(Vector3.zero, false)
+					end
+					RunService.Heartbeat:Wait()
+					task.wait(0.5)
+					continue
+				end
+				run.retarget = false
+				local watch = RunService.Heartbeat:Connect(function()
+					local r, t = myRoot(), danger.root()
+					if not r or not t then return end
+					if danger.gap(r.Position, t) < 40 or danger.pathGap(r.Position, gun.Position, t) < 25 then run.retarget = true end
+				end)
+				local outcome = danger.leg(run, legs, hum, watch)
+				run.moveDir = nil
+				if outcome == "stopped" then
+					grab.cut = true
+					break
+				end
+				if outcome == "arrived" and gunStillThere(gun) then
+					touchGun(gun)
+					break
+				end
+				if outcome == "stuck" then break end
+			end
 		end)
 		if run then finishRun() end
 		grab.walking = false
