@@ -4179,7 +4179,11 @@ end
 function danger.reachable(here, goal)
 	if not nav.live() then return true end
 	if danger.straight(here, goal) then return true end
-	return legsTo(here, goal) ~= nil
+	local from = nav.world:NodeAt(here, 8)
+	local to = nav.world:NodeAt(goal, 8)
+	if not from or not to then return false end
+	local a, b = nav.world:Piece(from), nav.world:Piece(to)
+	return a ~= nil and a == b
 end
 
 local function newRun(target, valid, kind)
@@ -6896,6 +6900,25 @@ function esp.heatColour(fraction)
 	return pick:Lerp(next_, f - low)
 end
 
+function esp.heatPiece(node)
+	local ok, label = pcall(function() return nav.world:Piece(node) end)
+	return ok and label or nil
+end
+
+function esp.heatTile(index)
+	local tile = esp.heat.tiles[index]
+	if not tile or not tile.Parent then
+		tile = Instance.new("Part")
+		tile.Name = "Tile"
+		tile.Anchored, tile.CanCollide, tile.CanTouch, tile.CanQuery = true, false, false, false
+		tile.Material = Enum.Material.Neon
+		tile.TopSurface, tile.BottomSurface = Enum.SurfaceType.Smooth, Enum.SurfaceType.Smooth
+		tile.Parent = esp.heat.folder
+		esp.heat.tiles[index] = tile
+	end
+	return tile
+end
+
 function esp.heatDraw()
 	local root = myRoot()
 	if not root or not nav.live() then return end
@@ -6909,35 +6932,71 @@ function esp.heatDraw()
 		esp.heat.folder = folder
 		table.clear(esp.heat.tiles)
 	end
+
 	local here = root.Position
 	local range = state.heatRange or 110
-	local nodes = nav.world:Nearby(here, range)
-	local pitch = nav.world.cell or 4
-	local shown = 0
+	local world = nav.world
+	local pitch = world.cell or 4
+	local standing = world:NodeAt(here, 8)
+	local mine = standing and esp.heatPiece(standing) or nil
+	local nodes = world:Nearby(here, range)
+	local used = 0
+
 	for _, node in nodes do
-		shown += 1
-		if shown > 900 then break end
-		local tile = esp.heat.tiles[shown]
-		if not tile or not tile.Parent then
-			tile = Instance.new("Part")
-			tile.Name = "Tile"
-			tile.Anchored, tile.CanCollide, tile.CanTouch, tile.CanQuery = true, false, false, false
-			tile.Material = Enum.Material.Neon
-			tile.TopSurface, tile.BottomSurface = Enum.SurfaceType.Smooth, Enum.SurfaceType.Smooth
-			tile.Parent = esp.heat.folder
-			esp.heat.tiles[shown] = tile
-		end
+		used += 1
+		if used > 1200 then break end
+		local tile = esp.heatTile(used)
+		local floor = node.Floor or node.Position
+		local head = node.Clear or pitch
 		tile.Size = Vector3.new(pitch, 0.15, pitch)
-		tile.Position = (node.Floor or node.Position) + Vector3.new(0, 0.12, 0)
-		local away = danger.flat(node.Position, here).Magnitude / range
-		local okRisk, risk = pcall(function() return nav.world:Risk(node) end)
+		tile.Position = floor + Vector3.new(0, 0.12, 0)
+
+		-- cost to stand here: how far, how much climbing, how exposed, how tight
+		local away = danger.flat(node.Position, here).Magnitude / math.max(range, 1)
+		local lift = math.abs(node.Position.Y - here.Y) / 30
+		local okRisk, risk = pcall(function() return world:Risk(node) end)
 		risk = okRisk and type(risk) == "number" and risk or 0
-		local climb = math.abs(node.Position.Y - here.Y) / 24
-		local heat = math.clamp(away * 0.7 + climb * 0.2 + risk * 1.5, 0, 1)
-		tile.Color = esp.heatColour(heat)
-		tile.Transparency = 0.45
+		local tight = head < 6 and (6 - head) / 6 or 0
+		local heat = math.clamp(away * 0.55 + lift * 0.25 + risk * 1.2 + tight * 0.3, 0, 1)
+
+		local cut = mine ~= nil and esp.heatPiece(node) ~= mine
+		if cut then
+			tile.Color = Color3.fromRGB(120, 40, 140)
+			tile.Transparency = 0.25
+		else
+			tile.Color = esp.heatColour(heat)
+			tile.Transparency = 0.45
+		end
 	end
-	for i = shown + 1, #esp.heat.tiles do
+
+	-- every way off this tile that is not plain walking: jumps, drops, climbs, ledges
+	for _, node in nodes do
+		if used > 1600 then break end
+		local okAff, list = pcall(function() return world:AffordancesAt(node) end)
+		if okAff and list then
+			for _, aff in list do
+				local exits = aff.Exits or aff.Entries
+				if exits then
+					for _, exit in exits do
+						local to = exit.Position or exit.Floor
+						if to then
+							used += 1
+							if used > 1600 then break end
+							local link = esp.heatTile(used)
+							local from = (node.Floor or node.Position) + Vector3.new(0, 0.6, 0)
+							local span = to - from
+							link.Size = Vector3.new(0.5, 0.5, math.max(span.Magnitude, 0.5))
+							link.CFrame = CFrame.lookAt(from + span / 2, to)
+							link.Color = Color3.fromRGB(255, 255, 255)
+							link.Transparency = 0.2
+						end
+					end
+				end
+			end
+		end
+	end
+
+	for i = used + 1, #esp.heat.tiles do
 		if esp.heat.tiles[i] then
 			esp.heat.tiles[i]:Destroy()
 			esp.heat.tiles[i] = nil
