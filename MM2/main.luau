@@ -4129,6 +4129,7 @@ local murderSec = combatSec:Group({ Text = "Murderer", Icon = "skull" })
 
 ui.targetPick = murderSec:Dropdown({
 	Text = "Target",
+	Icon = "crosshair",
 	Options = { "Everyone", "Nearest", "Gun holder" },
 	Default = "Nearest",
 	Save = prefs.key("combat", "target"),
@@ -4136,6 +4137,7 @@ ui.targetPick = murderSec:Dropdown({
 
 murderSec:Button({
 	Text = "Kill target",
+	Icon = "skull",
 	ButtonText = "Kill",
 	ButtonIcon = "swords",
 	Style = "soft",
@@ -4207,6 +4209,7 @@ local sheriffSec = combatSec:Group({ Text = "Sheriff", Icon = "shield" })
 
 sheriffSec:Button({
 	Text = "Kill murderer",
+	Icon = "crosshair",
 	ButtonText = "Shoot",
 	ButtonIcon = "skull",
 	Style = "soft",
@@ -4249,6 +4252,7 @@ sheriffSec:Toggle({
 
 ui.grabGunBtn = sheriffSec:Button({
 	Text = "Grab dropped gun",
+	Icon = "hand",
 	ButtonText = "Grab",
 	ButtonIcon = "hand",
 	Callback = function()
@@ -4284,7 +4288,7 @@ end
 
 sheriffSec:Toggle({
 	Text = "Silent aim",
-	Icon = "crosshair",
+	Icon = "target",
 	RevertOnClose = true,
 	Callback = function(on)
 		state.silentAim = on
@@ -4297,6 +4301,7 @@ sheriffSec:Toggle({
 
 sheriffSec:Slider({
 	Text = "Aim FOV",
+	Icon = "scan-eye",
 	Description = "All the way right is infinite.",
 	Min = 20, Max = AIM_FOV_MAX, Default = 160, Step = 10, Suffix = "px",
 	Save = prefs.key("combat", "aimFov"),
@@ -4329,6 +4334,7 @@ ui.auraStatus = auraSec:Status({ Text = "Hits", Default = "nobody, you are unarm
 
 auraSec:Toggle({
 	Text = "Enabled",
+	Icon = "toggle-left",
 	RevertOnClose = true,
 	Callback = function(on)
 		state.killAura = on
@@ -4338,6 +4344,7 @@ auraSec:Toggle({
 
 auraSec:Slider({
 	Text = "Range",
+	Icon = "radar",
 	Min = 4, Max = 200, Default = 12, Step = 1, Suffix = " studs",
 	Save = prefs.key("combat", "killRange"),
 	Callback = function(v) state.killRange = v end,
@@ -4345,16 +4352,18 @@ auraSec:Slider({
 
 auraSec:Slider({
 	Text = "Interval",
+	Icon = "timer",
 	Min = 0.05, Max = 1, Default = 0.2, Step = 0.05, Suffix = "s",
 	Save = prefs.key("combat", "killDelay"),
 	Callback = function(v) state.killDelay = v end,
 })
 
-local mapSec = win:Section("Map", "map-pin")
+local mapSec = win:Section("Map", "map")
 mapSec:Title({ Text = "TELEPORT", Icon = "move" })
 
 mapSec:Button({
 	Text = "Teleport to map",
+	Icon = "map-pin",
 	ButtonText = "Go",
 	ButtonIcon = "crosshair",
 	Style = "filled",
@@ -4389,12 +4398,14 @@ mapSec:IconButton({
 
 ui.tpPick = mapSec:Dropdown({
 	Text = "Player",
+	Icon = "user",
 	Options = { "nobody" },
 	Default = "nobody",
 })
 
 mapSec:Button({
 	Text = "Teleport to player",
+	Icon = "navigation",
 	ButtonText = "Go",
 	ButtonIcon = "zap",
 	Tooltip = "Puts you right behind the player picked above.",
@@ -4407,6 +4418,7 @@ mapSec:Button({
 
 mapSec:Button({
 	Text = "Walk to player",
+	Icon = "footprints",
 	ButtonText = "Walk",
 	ButtonIcon = "footprints",
 	Tooltip = "Uses the auto walker to reach the player picked above.",
@@ -4445,6 +4457,7 @@ end
 
 vote.pick = mapSec:Dropdown({
 	Text = "Favourite maps",
+	Icon = "map-pinned",
 	Description = "Tick any you like and the lobby vote goes to the first ticked one on the board. Nothing ticked means no auto vote.",
 	Options = table.clone(vote.known),
 	Multi = true,
@@ -4568,6 +4581,7 @@ plrSec:Toggle({
 
 plrSec:Slider({
 	Text = "Fly speed",
+	Icon = "wind",
 	Min = 10, Max = 300, Default = 60, Step = 5, Suffix = " studs/s",
 	Save = prefs.key("movement", "flySpeed"),
 	Callback = function(v) state.flySpeed = v end,
@@ -4648,12 +4662,12 @@ espSec:Toggle({
 	end,
 })
 
-local statsSec = win:Section("Stats", "list")
+local statsSec = win:Section("Stats", "activity")
 local S = {}
 statsSec:Title({ Text = "YOUR ROLE", Icon = "user" })
 
-S.myRoleStatus = statsSec:Status({ Text = "You are", Default = "waiting for round" })
-S.weaponStatus = statsSec:Status({ Text = "Weapon", Default = "unarmed", Icon = "sword" })
+S.myRoleStatus = statsSec:Status({ Text = "You are", Default = "waiting for round", Icon = "drama" })
+S.weaponStatus = statsSec:Status({ Text = "Weapon", Default = "unarmed", Icon = "swords" })
 S.murdererStatus = statsSec:Status({ Text = "Murderer", Default = "waiting for round", Icon = "skull" })
 S.sheriffStatus = statsSec:Status({ Text = "Sheriff", Default = "waiting for round", Icon = "shield" })
 
@@ -4712,6 +4726,7 @@ setSec:Title({ Text = "INTERFACE", Icon = "layout" })
 
 setSec:Keybind({
 	Text = "Hide and show",
+	Icon = "app-window",
 	Default = Enum.KeyCode.RightShift,
 	Save = prefs.key("interface", "guiKey"),
 	Callback = function() win:Toggle() end,
@@ -4783,6 +4798,7 @@ setSec:Title({ Text = "AUTO WALKING", Icon = "footprints" })
 
 setSec:Slider({
 	Text = "Auto walk speed",
+	Icon = "gauge",
 	Description = "Used by coin collecting and Legit mode.",
 	Min = 16, Max = 25, Default = 22, Step = 1, Suffix = " studs/s",
 	Save = prefs.key("coins", "coinSpeed"),
@@ -4802,6 +4818,7 @@ setSec:Title({ Text = "THEME", Icon = "brush" })
 
 local themePick = setSec:Dropdown({
 	Text = "Theme",
+	Icon = "palette",
 	Options = Ember.ThemeNames(),
 	Default = Ember.CurrentTheme or "Dark",
 	ResetTo = "Dark",
@@ -4842,7 +4859,8 @@ function ui.configNow()
 end
 
 ui.cfgGroup:Button({
-	Text = "Export to clipboard",
+	Text = "Export config",
+	Icon = "upload",
 	ButtonText = "Export",
 	ButtonIcon = "clipboard-copy",
 	Callback = function()
@@ -4865,6 +4883,7 @@ ui.cfgGroup:Button({
 
 ui.cfgGroup:Button({
 	Text = "Import config",
+	Icon = "download",
 	Description = "Reads rbxlolhub_config.json from your executor's workspace folder.",
 	ButtonText = "Import",
 	ButtonIcon = "clipboard-paste",
@@ -4914,6 +4933,7 @@ local totalsGroup = setSec:Group({ Text = "Manage saved stats", Icon = "wrench",
 
 totalsGroup:Button({
 	Text = "Reset session only",
+	Icon = "rotate-cw",
 	ButtonText = "Reset",
 	ButtonIcon = "rotate-cw",
 	Click = { Rotate = 360 },
@@ -4929,6 +4949,7 @@ totalsGroup:Button({
 
 totalsGroup:Button({
 	Text = "Reset all-time totals",
+	Icon = "trash-2",
 	ButtonText = "Wipe",
 	ButtonIcon = "trash-2",
 	Danger = true,
@@ -4942,6 +4963,7 @@ totalsGroup:Button({
 
 setSec:Button({
 	Text = "Reset settings to default",
+	Icon = "rotate-ccw",
 	Description = "Puts every control, the theme and the window back to how they were on first launch. Stats stay.",
 	ButtonText = "Reset",
 	ButtonIcon = "rotate-ccw",
