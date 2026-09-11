@@ -5024,7 +5024,8 @@ esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, trapsAt 
 	pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }),
 	shade = setmetatable({}, { __mode = "k" }), traps = setmetatable({}, { __mode = "k" }),
 	lit = setmetatable({}, { __mode = "k" }), cutOf = setmetatable({}, { __mode = "k" }), was = nil,
-	owner = setmetatable({}, { __mode = "k" }), cut = nil }
+	owner = setmetatable({}, { __mode = "k" }), cut = nil, seen = nil, eyeAt = nil, eyeDir = nil,
+	dirty = true, foeAt = nil, legAt = nil }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -5089,6 +5090,26 @@ function esp.heatTile(index)
 	return tile
 end
 
+function esp.heatView()
+	-- Which cells are on screen only changes when the eye moves or turns.
+	local cam = Workspace.CurrentCamera
+	if not cam then return false end
+	local at, dir = cam.CFrame.Position, cam.CFrame.LookVector
+	if not esp.heat.eyeAt then return true end
+	return (at - esp.heat.eyeAt).Magnitude >= 2 or dir:Dot(esp.heat.eyeDir) < 0.995
+end
+
+function esp.heatStale()
+	-- What colour each cell is only changes when the murderer or the route moves.
+	if esp.heat.dirty then return true end
+	local foe = danger.foe()
+	local at = foe and foe.Position or nil
+	if (at ~= nil) ~= (esp.heat.foeAt ~= nil) then return true end
+	if at and (at - esp.heat.foeAt).Magnitude > 2 then return true end
+	local leg = coinRun and coinRun.active and coinRun.leg or nil
+	return leg ~= esp.heat.legAt
+end
+
 function esp.heatDraw()
 	local root = myRoot()
 	if not root or not nav.live() then
@@ -5107,12 +5128,13 @@ function esp.heatDraw()
 		esp.heat.at = 0
 		table.clear(esp.heat.pieces)
 		table.clear(esp.heat.risks)
-		esp.heat.cut = nil
+		esp.heat.cut, esp.heat.seen = nil, nil
+		esp.heat.dirty = true
 	end
-	-- redraw every frame; the work is skipped per tile when nothing about it changed
-	local moved = not esp.heat.was or (root.Position - esp.heat.was).Magnitude > 1
-	local slice = now - esp.heat.at > 0.12
-	if not moved and not slice then return end
+	-- Nothing on screen can have changed: do not touch a single tile.
+	local viewMoved = esp.heatView()
+	local heatMoved = esp.heatStale()
+	if not viewMoved and not heatMoved and esp.heat.seen then return end
 	esp.heat.at = now
 	esp.heat.was = root.Position
 	if not esp.heat.folder or not esp.heat.folder.Parent then
@@ -5131,12 +5153,11 @@ function esp.heatDraw()
 	local mine = standing and esp.heatPiece(standing) or nil
 	local eye, look, minDot = esp.heatCone()
 	local budget = state.heatTiles or 2200
-	-- How far to draw is not a setting, it is whatever fits the budget on this map.
-	-- Sorting the candidates to keep the nearest cost 8ms a draw on a 24k-node map;
-	-- letting the distance find its own level costs nothing and settles in six draws.
 	local cut = math.min(esp.heat.cut or range, range)
-	local nodes = {}
-	if eye then
+	local nodes = esp.heat.seen
+	if eye and (viewMoved or not nodes) then
+		-- the whole map is a candidate; the camera decides what is worth a part
+		nodes = {}
 		local reach = cut * cut
 		for _, byZ in pairs(world.columns) do
 			for _, list in pairs(byZ) do
@@ -5152,15 +5173,18 @@ function esp.heatDraw()
 				end
 			end
 		end
-		-- pull in when it costs too much, ease back out when there is room to spare
+		esp.heat.seen = nodes
+		esp.heat.eyeAt, esp.heat.eyeDir = eye, look
+		-- how far to draw is not a setting, it is whatever fits the budget here
 		if #nodes > budget then
 			esp.heat.cut = math.max(cut * 0.92, 40)
 		elseif #nodes < budget * 0.8 then
 			esp.heat.cut = math.min(cut * 1.05, range)
 		end
-	else
+	elseif not eye then
 		nodes = world:Nearby(here, range)
 	end
+	nodes = nodes or {}
 	local used = 0
 	local flatSize = Vector3.new(pitch, 0.15, pitch)
 
@@ -5317,6 +5341,12 @@ function esp.heatDraw()
 			end
 		end
 	end
+
+	-- remember what this picture was drawn for, so the next frame can skip it
+	esp.heat.dirty = false
+	local drawnFoe = danger.foe()
+	esp.heat.foeAt = drawnFoe and drawnFoe.Position or nil
+	esp.heat.legAt = coinRun and coinRun.active and coinRun.leg or nil
 
 	for i = used + 1, #esp.heat.tiles do
 		if esp.heat.tiles[i] then
@@ -6211,17 +6241,26 @@ win:Track(RunService.Heartbeat:Connect(function()
 	if now - T.tick >= 1 then
 		local delta = now - T.tick
 		T.tick = now
-		danger.watchThrows()
-		danger.guardTouch()
-		for _, who in Players:GetPlayers() do
-			if who ~= player and not danger.knifeSeen[who] then danger.sawKnife(who) end
-		end
+		-- Navigation first, and on its own: a throw in the knife or ESP code
+		-- below must never be able to starve the map the router walks on.
 		local liveMap = getMap()
 		local lost = nav.map ~= nil and nav.map.Parent == nil
 		if (liveMap ~= nav.map or lost) and now - T.navFix > 5 then
 			T.navFix = now
 			if lost and liveMap == nav.map then nav.reset() end
-			if liveMap and liveMap.Parent then task.spawn(nav.build, liveMap) else nav.reset() end
+			if liveMap and liveMap.Parent then
+				task.spawn(function()
+					local built = pcall(nav.build, liveMap)
+					if not built then nav.reset() end
+				end)
+			else
+				nav.reset()
+			end
+		end
+		danger.watchThrows()
+		danger.guardTouch()
+		for _, who in Players:GetPlayers() do
+			if who ~= player and not danger.knifeSeen[who] then danger.sawKnife(who) end
 		end
 		if delta < 5 then totals.playtime += delta end
 		if state.roleEsp then refreshRoleEsp() end
