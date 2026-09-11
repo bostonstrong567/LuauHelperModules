@@ -3678,10 +3678,11 @@ end
 local esp = { highlights = {}, nameTags = {}, coinBoxes = {}, gunBoxes = {}, bodies = {} }
 
 function danger.corpseOf(body)
-	if Players:GetPlayerFromCharacter(body) then return true end
 	local hum = body:FindFirstChildOfClass("Humanoid")
 	if not hum or hum.Health > 0 then return false end
-	return Players:FindFirstChild(body.Name) ~= nil or roleData()[body.Name] ~= nil
+	local who = Players:GetPlayerFromCharacter(body)
+	if who then return isDead(who) end
+	return roleData()[body.Name] ~= nil
 end
 
 ------------------------------------------------------------------------------------------------- ESP
@@ -4810,6 +4811,98 @@ local themePick = setSec:Dropdown({
 
 Ember.OnThemesChanged(function(names) themePick:SetOptions(names) end, win)
 Ember.OnThemeApplied(function(name) themePick:Set(name, true) end, win)
+
+setSec:Separator()
+setSec:Title({ Text = "CONFIG", Icon = "file-json" })
+
+ui.cfgGroup = setSec:Group({ Text = "Export and import", Icon = "file-json", Open = false })
+ui.cfgGroup:Description("Export copies every saved setting to your clipboard. Paste one in and press Import to apply it, then relaunch.")
+
+ui.saveKeys = {
+	"legit4", "spareFriends", "target", "autoPickup", "aimFov", "showFov",
+	"killRange", "killDelay", "favMaps", "coinsFirst", "avoid", "coinSpeed",
+	"coinPath", "antiFling", "walkSpeed", "jumpPower", "gravity", "flySpeed",
+	"roleEsp", "nameEsp", "showDead", "gunEsp", "coinEsp",
+	"guiKey", "notify", "antiIdle", "resetFor2", "theme",
+}
+
+function ui.configNow()
+	local out = {}
+	for _, key in ui.saveKeys do
+		local v = Ember.Persist.get(key, nil)
+		if v ~= nil then
+			if typeof(v) == "EnumItem" then v = "Enum:" .. v.Name end
+			out[key] = v
+		end
+	end
+	return { version = 1, keep = prefs.keep, values = out }
+end
+
+ui.cfgGroup:Button({
+	Text = "Export to clipboard",
+	ButtonText = "Copy",
+	ButtonIcon = "clipboard-copy",
+	Callback = function()
+		local okJson, json = pcall(function()
+			return game:GetService("HttpService"):JSONEncode(ui.configNow())
+		end)
+		if not okJson then
+			report(false, nil, "could not encode: " .. tostring(json))
+			return
+		end
+		local okCopy = pcall(setclipboard, json)
+		report(okCopy, "Config copied, " .. #json .. " bytes", "clipboard unavailable")
+	end,
+})
+
+ui.configBox = ui.cfgGroup:Input({
+	Text = "Config",
+	Placeholder = "paste exported config here",
+	Style = "outline",
+})
+
+ui.cfgGroup:Button({
+	Text = "Import from the box above",
+	ButtonText = "Import",
+	ButtonIcon = "clipboard-paste",
+	Danger = true,
+	Click = { Icon = "check", Hold = 1 },
+	Callback = function()
+		local text = tostring(ui.configBox:Get() or "")
+		if #text < 2 then
+			report(false, nil, "paste a config first")
+			return
+		end
+		local okJson, cfg = pcall(function()
+			return game:GetService("HttpService"):JSONDecode(text)
+		end)
+		if not okJson or type(cfg) ~= "table" or type(cfg.values) ~= "table" then
+			report(false, nil, "that is not a valid config")
+			return
+		end
+		local known, wrote = {}, 0
+		for _, key in ui.saveKeys do known[key] = true end
+		for key, v in pairs(cfg.values) do
+			if known[key] then
+				if type(v) == "string" and v:sub(1, 5) == "Enum:" then
+					v = Enum.KeyCode[v:sub(6)] or nil
+				end
+				if v ~= nil then
+					Ember.Persist.set(key, v)
+					wrote += 1
+				end
+			end
+		end
+		if type(cfg.keep) == "table" then
+			for key in pairs(prefs.defaults) do
+				if type(cfg.keep[key]) == "boolean" then prefs.keep[key] = cfg.keep[key] end
+			end
+			Ember.Store.set("mm2_prefs", { keep = prefs.keep })
+		end
+		Ember.Persist.flush()
+		report(wrote > 0, "Imported " .. wrote .. " settings, relaunch to apply", "nothing recognised in that config")
+	end,
+})
 
 setSec:Separator()
 setSec:Title({ Text = "SAVED DATA", Icon = "database" })
