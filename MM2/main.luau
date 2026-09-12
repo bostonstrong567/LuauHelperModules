@@ -2792,7 +2792,11 @@ function danger.fleeLegs(root, threat)
 			return score
 		end,
 	})
+	-- same cap as roaming: eight path computations in a row is a visible freeze
+	local tried = 0
 	for _, entry in best do
+		tried += 1
+		if tried > 2 then break end
 		local at = entry.at + Vector3.new(0, 2, 0)
 		local legs = legsTo(here, at)
 		if legs and (entry.score < 0 or danger.routeSafe(legs, here, threat)) then
@@ -2938,7 +2942,13 @@ function danger.roamLegs(root, threatRoot)
 	end
 	local tries = shortlist(true)
 	if #tries == 0 then tries = shortlist(false) end
+	-- One legsTo can cost two path computations (~60ms). Eight of them in a row
+	-- measured 800ms with the character standing still. Try the best couple and
+	-- let the next tick carry on; roamDud already spaces the retries.
+	local tried = 0
 	for _, entry in tries do
+		tried += 1
+		if tried > 2 then break end
 		local at = entry.at
 		local seen = threatRoot and (at - threatRoot.Position).Magnitude < 90
 			and not Workspace:Raycast(threatRoot.Position, at + Vector3.new(0, 1, 0) - threatRoot.Position, eyes)
