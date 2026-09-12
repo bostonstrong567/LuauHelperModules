@@ -4127,7 +4127,7 @@ end
 function danger.lethal(pos, within)
 	-- scorers call this per candidate; a nil navigator must not throw
 	if not nav.navigator then return false end
-	return nav.navigator ~= nil and nav.navigator:Lethal(pos, within, 1)
+	return nav.navigator:Lethal(pos, within, 1)
 end
 
 function nav.costFor(him, me, careful)
