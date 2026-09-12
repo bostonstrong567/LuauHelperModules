@@ -4125,6 +4125,8 @@ function nav.blocked(s)
 end
 
 function danger.lethal(pos, within)
+	-- scorers call this per candidate; a nil navigator must not throw
+	if not nav.navigator then return false end
 	return nav.navigator ~= nil and nav.navigator:Lethal(pos, within, 1)
 end
 
@@ -4678,6 +4680,13 @@ end
 function danger.fleeLegs(root, threat)
 	local now = os.clock()
 	local here = root.Position
+	-- No lattice means Reachable would throw, and that throw kills the whole
+	-- brain mid-chase. Both callers cope with nil by falling back to breakout,
+	-- which needs no lattice at all.
+	if not nav.live() or not nav.navigator then
+		local legsOut, goalOut = danger.breakout(root, threat)
+		return legsOut, goalOut
+	end
 	if danger.closeBy(here, threat, 18) and danger.gap(here, threat) < 18 then
 		local legsOut, goalOut = danger.breakout(root, threat)
 		if legsOut then return legsOut, goalOut end
