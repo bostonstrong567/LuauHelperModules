@@ -4162,6 +4162,14 @@ local function legsTo(from, goal, ignore)
 	end
 	if not nav.live() and lineIsClear(from, goal, ignore) then return { finalLeg } end
 	local best, bestTime = nil, math.huge
+	-- The lattice router measured 0.5ms; PathfindingService measured 101.9ms on
+	-- the same query and returned NoPath. Ask the cheap one first and only pay
+	-- for the expensive one when the lattice cannot answer.
+	local quick = nav.route(from, goal)
+	if quick then
+		nav.used += 1
+		return quick
+	end
 	if state.coinPath and (danger.traps[danger.goalKey(from)] or 0) < os.clock() then
 		local rp = excludeMe()
 		if ignore then rp.FilterDescendantsInstances = { myChar(), ignore } end
