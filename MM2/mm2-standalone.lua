@@ -7107,7 +7107,7 @@ function esp.heatDraw()
 		-- it: cells grow with area, so the reach that fits is cut * sqrt(budget/seen).
 		-- Fixed ratios overshot to 2896 cells against a 2200 budget (10.8ms a frame).
 		-- An empty view says nothing about direction, so scaling the reach by it
-		pins it at the floor forever: seen=0 left cut stuck at 40 studs on a 24000
+		-- pins it at the floor forever: seen=0 left cut stuck at 40 studs on a
 		-- node map and nothing drew at all. Open all the way back up instead.
 		local seen = #nodes
 		if seen == 0 then
