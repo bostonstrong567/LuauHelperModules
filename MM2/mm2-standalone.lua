@@ -4638,6 +4638,8 @@ function danger.fleeLegs(root, threat)
 			if run < 10 then return nil end
 			local his = danger.gap(p, threat)
 			local score = math.min(his, 120) + math.min(run, 80) * 0.8
+			-- getting out of sight is worth as much as getting far away
+			if danger.exposed(p, threat) then score -= 70 end
 			if his < math.max(mine, danger.safe) then score -= 60 end
 			if his / 18 < run / math.max(state.coinSpeed or 22, 16) + 0.5 then score -= 80 end
 			local hisWay = danger.flat(p, threat.Position)
@@ -4717,6 +4719,26 @@ function danger.floorAt(x, y, z)
 	return nil
 end
 
+function danger.coinPull(at)
+	-- Wandering scored only distance, so the farthest corner always won and it
+	-- walked the same circuit forever. Coins are the point of wandering.
+	local near
+	for _, part in coinParts() do
+		local d = (part.Position - at).Magnitude
+		if not near or d < near then near = d end
+	end
+	return near
+end
+
+function danger.exposed(at, threat)
+	-- Standing where he can see you is its own cost, whatever the distance.
+	if not threat or not threat.Parent then return false end
+	local eye = threat.Position + Vector3.new(0, 1.5, 0)
+	local rp = danger.rayIgnoring({ myChar(), threat.Parent })
+	rp.RespectCanCollide = true
+	return not Workspace:Raycast(eye, at + Vector3.new(0, 1, 0) - eye, rp)
+end
+
 function danger.roamLegs(root, threatRoot)
 	local map = getMap()
 	if not (map and nav.live()) then return nil end
@@ -4741,16 +4763,28 @@ function danger.roamLegs(root, threatRoot)
 				if run < 25 or run > 250 then return nil end
 				if (danger.badGoals[danger.goalKey(p)] or 0) > now then return nil end
 				if danger.lethal(p, 12) then return nil end
+				-- Somewhere it just came from is worth less, but not worthless: a hard
+				-- reject used to empty the shortlist and it would pick the same corner.
+				local stale = 0
 				for i, was in danger.beenTo do
-					local near = avoid and 25 or (i > #danger.beenTo - 2 and 15 or 0)
-					if near > 0 and (p - was).Magnitude < near then return nil end
+					local gap = (p - was).Magnitude
+					if gap < 30 then
+						local recent = i > #danger.beenTo - 3 and 2 or 1
+						stale += (30 - gap) * recent
+					end
 				end
-				local score = math.min(run, 120) * 0.4
+				if avoid and stale > 45 then return nil end
+				local score = math.min(run, 120) * 0.4 - stale
+				-- walk toward coins, not just away from him
+				local pull = danger.coinPull(p)
+				if pull then score += math.max(0, 90 - pull) * 0.9 end
 				if threatRoot then
 					local his = (p - threatRoot.Position).Magnitude
 					if his < math.min(math.max(mine - 10, danger.near), danger.safe) then return nil end
 					if ahead and (p - ahead).Magnitude < 40 then return nil end
 					score += math.min(his, 150) * 0.6
+					-- do not stand in his eyeline while wandering
+					if danger.exposed(p, threatRoot) then score -= 55 end
 				end
 				danger.keepBest(best, state.Lattice and state.Floor or p, score)
 				return score
@@ -4768,7 +4802,7 @@ function danger.roamLegs(root, threatRoot)
 		if legs and (not threatRoot or danger.routeSafe(legs, here, threatRoot)) then
 			local been = danger.beenTo
 			table.insert(been, at)
-			if #been > 8 then table.remove(been, 1) end
+			if #been > 24 then table.remove(been, 1) end
 			return legs, at + Vector3.new(0, 2, 0)
 		end
 		danger.badGoals[danger.goalKey(at)] = now + 1.5
@@ -6879,9 +6913,9 @@ ui.colourSec:ColorPicker({
 esp.heat = { folder = nil, conn = nil, tiles = {}, at = 0, world = nil, trapsAt = 0,
 	pieces = setmetatable({}, { __mode = "k" }), risks = setmetatable({}, { __mode = "k" }),
 	shade = setmetatable({}, { __mode = "k" }), traps = setmetatable({}, { __mode = "k" }),
-	lit = setmetatable({}, { __mode = "k" }), cutOf = setmetatable({}, { __mode = "k" }), was = nil,
+	lit = setmetatable({}, { __mode = "k" }), cutOf = setmetatable({}, { __mode = "k" }),
 	owner = setmetatable({}, { __mode = "k" }), cut = nil, seen = nil, eyeAt = nil, eyeDir = nil,
-	dirty = true, foeAt = nil, legAt = nil }
+	dirty = true, foeAt = nil, legAt = nil, walk = nil, walkAt = nil }
 
 function esp.heatClear()
 	if esp.heat.conn then
@@ -6966,6 +7000,43 @@ function esp.heatStale()
 	return leg ~= esp.heat.legAt
 end
 
+function esp.heatWalk(hunter, reach)
+	-- Which cells can he actually WALK to? Straight-line distance calls a cell one
+	-- stud behind a wall as dangerous as one in the open: measured on Mansion2,
+	-- 396 of 536 cells near him were not reachable at all.
+	-- Reach filters by straight line from him, so a band means "connected to him
+	-- and within N studs", not N studs of walking. That is what stops the bleed.
+	if not hunter or not nav.live() or not nav.navigator then return nil end
+	local found = { bands = 4 }
+	-- One flood, sized to how far he can actually get. Bands come from distance
+	-- inside the walk, which Reach already filters on. Four separate floods to
+	-- 120 studs measured 12ms; this is the same answer for about 1.5ms.
+	local far = math.max(reach or 48, 24)
+	do
+		local step = 1
+		local ok = pcall(function()
+			nav.navigator:Reachable({
+				Agent = nav.agent,
+				Position = hunter,
+				Reach = far,
+				Nodes = nav.budget(true),
+				Blocked = nav.blocked,
+				Score = function(st)
+					local key = (st.ix or 0) * 100000 + (st.iz or 0)
+					local p = st.Lattice and st.Floor or st.Position
+					local d = (p - hunter).Magnitude
+					local band = d <= far * 0.25 and 1 or d <= far * 0.5 and 2
+						or d <= far * 0.75 and 3 or 4
+					if found[key] == nil or band < found[key] then found[key] = band end
+					return 0
+				end,
+			})
+		end)
+		if not ok then return nil end
+	end
+	return found
+end
+
 function esp.heatDraw()
 	local root = myRoot()
 	if not root or not nav.live() then
@@ -6985,6 +7056,7 @@ function esp.heatDraw()
 		table.clear(esp.heat.pieces)
 		table.clear(esp.heat.risks)
 		esp.heat.cut, esp.heat.seen = nil, nil
+		esp.heat.walk, esp.heat.walkAt = nil, nil
 		esp.heat.dirty = true
 	end
 	-- Nothing on screen can have changed: do not touch a single tile.
@@ -6992,7 +7064,6 @@ function esp.heatDraw()
 	local heatMoved = esp.heatStale()
 	if not viewMoved and not heatMoved and esp.heat.seen then return end
 	esp.heat.at = now
-	esp.heat.was = root.Position
 	if not esp.heat.folder or not esp.heat.folder.Parent then
 		local folder = Instance.new("Folder")
 		folder.Name = "MM2Heat"
@@ -7032,10 +7103,19 @@ function esp.heatDraw()
 		esp.heat.seen = nodes
 		esp.heat.eyeAt, esp.heat.eyeDir = eye, look
 		-- how far to draw is not a setting, it is whatever fits the budget here
-		if #nodes > budget then
-			esp.heat.cut = math.max(cut * 0.92, 40)
-		elseif #nodes < budget * 0.8 then
-			esp.heat.cut = math.min(cut * 1.05, range)
+		-- Aim straight at the reach the count implies rather than creeping toward
+		-- it: cells grow with area, so the reach that fits is cut * sqrt(budget/seen).
+		-- Fixed ratios overshot to 2896 cells against a 2200 budget (10.8ms a frame).
+		-- An empty view says nothing about direction, so scaling the reach by it
+		pins it at the floor forever: seen=0 left cut stuck at 40 studs on a 24000
+		-- node map and nothing drew at all. Open all the way back up instead.
+		local seen = #nodes
+		if seen == 0 then
+			esp.heat.cut = range
+		elseif seen > budget or seen < budget * 0.7 then
+			-- cells grow with area, so the reach that fits is cut * sqrt(budget/seen)
+			local want = cut * math.sqrt(budget / seen)
+			esp.heat.cut = math.clamp(cut + (want - cut) * 0.5, pitch * 6, range)
 		end
 	elseif not eye then
 		nodes = world:Nearby(here, range)
@@ -7047,7 +7127,23 @@ function esp.heatDraw()
 	-- the murderer drives the heat: everything else is a modifier on top
 	local foe = danger.foe()
 	local hunter = foe and foe.Position or nil
-	local hunted = math.max(danger.safe or 60, 1)
+	-- How far he is dangerous from is how far he can travel while you react, not
+	-- a number I picked. Every player measures WalkSpeed 16; use what he is
+	-- actually doing when that is faster.
+	local pace = 16
+	if foe then
+		local v = foe.AssemblyLinearVelocity
+		pace = math.max(pace, Vector3.new(v.X, 0, v.Z).Magnitude)
+	end
+	local hunted = math.max(pace * 3, 1)
+	if hunter then
+		if not esp.heat.walkAt or (hunter - esp.heat.walkAt).Magnitude > 2 then
+			esp.heat.walk = esp.heatWalk(hunter, hunted)
+			esp.heat.walkAt = hunter
+		end
+	else
+		esp.heat.walk, esp.heat.walkAt = nil, nil
+	end
 
 	-- trap and lethal memory, sampled per draw rather than per tile
 	if os.clock() - (esp.heat.trapsAt or 0) > 1 then
@@ -7099,10 +7195,19 @@ function esp.heatDraw()
 
 		if hunter then
 			-- hottest where the murderer stands, cooling over his reach
-			local toHim = danger.flat(node.Position, hunter).Magnitude
-			local drop = math.abs(node.Position.Y - hunter.Y)
-			local near = 1 - math.clamp((toHim + drop * 2) / hunted, 0, 1)
-			heat += near * near * 1.9
+			-- A cell he cannot walk to is not dangerous, however close it looks.
+			local walk = esp.heat.walk
+			local band = walk and walk[(node.ix or 0) * 100000 + (node.iz or 0)] or nil
+			if band then
+				local near = 1 - (band - 1) / walk.bands
+				heat += near * near * 1.9
+			elseif not walk then
+				-- no flood this pass: fall back to distance rather than showing nothing
+				local toHim = danger.flat(node.Position, hunter).Magnitude
+				local drop = math.abs(node.Position.Y - hunter.Y)
+				local near = 1 - math.clamp((toHim + drop * 2) / hunted, 0, 1)
+				heat += near * near * 1.9
+			end
 		end
 		if esp.heat.traps[node] then heat += 1.2 end
 		heat = math.clamp(heat, 0, 1)
