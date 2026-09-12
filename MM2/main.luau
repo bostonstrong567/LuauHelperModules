@@ -1766,7 +1766,9 @@ local function travel(run, points, hum)
 	local fix = { level = 0, stalled = 0, progress = 0 }
 	local last = #points
 	local legStart = os.clock()
+	local legFrom = (myRoot() and myRoot().Position) or nil
 	run.points, run.leg = points, 0
+	run.urgent = false
 
 	local i = 0
 	while i < last do
@@ -1840,7 +1842,14 @@ local function travel(run, points, hum)
 		local bestFlat, bestAt = math.huge, os.clock()
 		while true do
 			if not run.active then return "stopped" end
-			if run.retarget and os.clock() - legStart > 0.4 then return "retarget" end
+			-- A clock was standing in for "we have committed to this leg": it meant a
+			-- victim who walked into range mid-leg was ignored for 0.4s, which is how
+			-- you stroll past people. Ask the real questions instead.
+			if run.retarget then
+				local r = myRoot()
+				local off = r and legFrom and (r.Position - legFrom).Magnitude > 2
+				if off or run.urgent then return "retarget" end
+			end
 			if not run.valid(run.target) then return "arrived" end
 			local root = myRoot()
 			if not root then return "stopped" end
@@ -6430,6 +6439,16 @@ win:Track(RunService.Heartbeat:Connect(function()
 	end
 	if state.hvh and T.actOk and not attackBusy and not coin.first() then sniper.hvh(now) end
 
+	-- Nothing ever retargeted for "a victim just came within reach", so a walk
+	-- carried on past them. Make that its own interrupt.
+	if coinRun and coinRun.active and (findTool("Knife") or findTool("Gun")) then
+		for _, e in legalTargets() do
+			if e.dist <= math.max(state.killRange or 12, KNIFE_REACH) then
+				coinRun.retarget, coinRun.urgent = true, true
+				break
+			end
+		end
+	end
 	local inAuraRange = false
 	if state.killAura and T.actOk and (findTool("Knife") or findTool("Gun")) then
 		local hits = {}
