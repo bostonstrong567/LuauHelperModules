@@ -3931,6 +3931,42 @@ end
 
 local nav = { ready = false, count = 0, map = nil, calls = 0, used = 0, stats = {}, world = nil, navigator = nil, agent = nil }
 
+function nav.origin(pos)
+	-- Reachable bails outright if NodeAt(pos, 6) misses, and then nothing is
+	-- planned at all: no candidates, no blacklist, no route, just shuffling.
+	-- Hand it a nearby node instead. Bounded to a few cells so we never flood
+	-- from somewhere we cannot actually reach -- failing closed beats a route
+	-- that starts on the far side of a wall.
+	if not nav.world then return pos end
+	if nav.world:NodeAt(pos, 6) then return pos end
+	local cell = nav.world.cell or 4
+	-- Measured on MilBase: of 356 floor points, 7 missed NodeAt, and the nearest
+	-- node at those spots ran 9.7 to 17.0 studs (median 11). Five cells covers
+	-- all of them; three cells missed the worst two.
+	local reach = cell * 5
+	-- vertical miss first: same 3x3 cells, just a taller tolerance
+	local up = nav.world:NodeAt(pos, reach)
+	if up and (up.Position - pos).Magnitude <= reach then
+		nav.snapped = (nav.snapped or 0) + 1
+		nav.snapWhy = "vertical"
+		return up.Position
+	end
+	-- horizontal miss: NodeAt only looks in the cells around us, so search by
+	-- true radius instead
+	local best, bestD
+	for _, n in nav.world:Nearby(pos, reach) do
+		local d = (n.Position - pos).Magnitude
+		if not bestD or d < bestD then best, bestD = n, d end
+	end
+	if best then
+		nav.snapped = (nav.snapped or 0) + 1
+		nav.snapWhy = "radius"
+		return best.Position
+	end
+	nav.snapMissed = (nav.snapMissed or 0) + 1
+	return pos
+end
+
 function nav.budget(cheap)
 	local seen = cheap and nav.costCheap or nav.costFull
 	if not seen then return cheap and 600 or 3000 end
@@ -3993,17 +4029,25 @@ end
 function nav.body()
 	local char = myChar()
 	if not char then return 2, 4.5 end
-	local widest, lowest, highest = 0, nil, nil
+	-- The router sweeps this as a square box, so the width decides which gaps it
+	-- believes it can use. Measured on this rig: the torso is 1.86 across but the
+	-- body is only 0.88 deep, and a character turns side-on to slip through. Using
+	-- the widest dimension made every half-open door read as a wall.
+	local wide, deep, lowest, highest = 0, math.huge, nil, nil
 	for _, part in char:GetChildren() do
 		if part:IsA("BasePart") and part.Name ~= "Handle" then
-			widest = math.max(widest, part.Size.X, part.Size.Z)
+			wide = math.max(wide, part.Size.X, part.Size.Z)
+			deep = math.min(deep, math.max(part.Size.X, part.Size.Z))
 			local half = part.Size.Y / 2
 			highest = highest and math.max(highest, part.Position.Y + half) or (part.Position.Y + half)
 			lowest = lowest and math.min(lowest, part.Position.Y - half) or (part.Position.Y - half)
 		end
 	end
-	if not lowest or widest <= 0 then return 2, 4.5 end
-	return math.max(widest, 1), math.max(highest - lowest, 2)
+	if not lowest or wide <= 0 then return 2, 4.5 end
+	-- somewhere between the two: not so thin it clips a doorframe, not so wide it
+	-- refuses a gap we can actually turn through
+	local fits = deep < math.huge and (deep + wide) / 2 or wide
+	return math.clamp(fits, 1, wide), math.max(highest - lowest, 2)
 end
 
 function nav.build(map)
@@ -4226,8 +4270,9 @@ local function legsTo(from, goal, ignore)
 	if not nav.live() and lineIsClear(from, goal, ignore) then return { finalLeg } end
 	local best, bestTime = nil, math.huge
 	-- The lattice router measured 0.5ms; PathfindingService measured 101.9ms on
-	-- the same query and returned NoPath. Ask the cheap one first and only pay
-	-- for the expensive one when the lattice cannot answer.
+	-- the same query, so ask the cheap one first. A cap on the expensive one
+	-- was tried and removed: warm planning measures about 1ms, and capping only
+	-- risks returning nil in a corner, which is what stranded us before.
 	local quick = nav.route(from, goal)
 	if quick then
 		nav.used += 1
@@ -4290,7 +4335,7 @@ local function coinLoop(run)
 	if not hum then return "no character" end
 	local lastCheck = 0
 
-	while run.active do
+	while run.active and not gone do
 		RunService.Heartbeat:Wait()
 		local now = os.clock()
 		if now - lastCheck > 0.25 then
@@ -4704,7 +4749,7 @@ function danger.fleeLegs(root, threat)
 	local best = {}
 	nav.navigator:Reachable({
 		Agent = nav.agent,
-		Position = here,
+		Position = nav.origin(here),
 		Reach = 200,
 		Nodes = nav.budget(false),
 		Blocked = nav.blocked,
@@ -4807,12 +4852,25 @@ function danger.floorAt(x, y, z)
 	return nil
 end
 
+function danger.coinSnapshot()
+	-- One scan per decision, not one per candidate. coinParts() validates every
+	-- coin in the set, so calling it 1261 times cost 955ms of a 1311ms decision.
+	local now = os.clock()
+	if danger.coinAt and now - danger.coinAt < 0.25 and danger.coinSpots then
+		return danger.coinSpots
+	end
+	local spots = {}
+	for _, part in coinParts() do spots[#spots + 1] = part.Position end
+	danger.coinSpots, danger.coinAt = spots, now
+	return spots
+end
+
 function danger.coinPull(at)
 	-- Wandering scored only distance, so the farthest corner always won and it
 	-- walked the same circuit forever. Coins are the point of wandering.
 	local near
-	for _, part in coinParts() do
-		local d = (part.Position - at).Magnitude
+	for _, spot in danger.coinSnapshot() do
+		local d = (spot - at).Magnitude
 		if not near or d < near then near = d end
 	end
 	return near
@@ -4840,7 +4898,7 @@ function danger.roamLegs(root, threatRoot)
 		local best = {}
 		nav.navigator:Reachable({
 			Agent = nav.agent,
-			Position = here,
+			Position = nav.origin(here),
 			Reach = 250,
 			Nodes = nav.budget(false),
 			Budget = 0.004,
@@ -4986,7 +5044,8 @@ function danger.brain()
 	danger.brainStart = started
 	local note = danger.log
 	note("start")
-	while run.active do
+	-- a destroyed hub must stop planning, or it keeps driving the character
+	while run.active and not gone do
 		RunService.Heartbeat:Wait()
 		local now = os.clock()
 		if now - lastCheck > 0.25 then
@@ -5505,7 +5564,7 @@ end
 function sniper.steer(run, hum, goal, label)
 	sniper.status(label)
 	local until_, still, last = os.clock() + 0.5, 0, nil
-	while run.active do
+	while run.active and not gone do
 		local root = myRoot()
 		if not root then return end
 		if danger.flat(goal, root.Position).Magnitude < 1.5 then return end
@@ -5689,7 +5748,7 @@ function sniper.duel(who, limit)
 	local started, shots, lastCheck = os.clock(), 0, 0
 	sniper.waitSince, sniper.backingOff = nil, false
 	local okLoop, errLoop = pcall(function()
-	while run.active and alive() do
+	while run.active and not gone and alive() do
 		local now = os.clock()
 		if now - started > limit then break end
 		if now - lastCheck > 0.25 then
@@ -7127,7 +7186,7 @@ function esp.heatWalk(hunter, reach)
 		local ok = pcall(function()
 			nav.navigator:Reachable({
 				Agent = nav.agent,
-				Position = hunter,
+				Position = nav.origin(hunter),
 				Reach = far,
 				Nodes = nav.budget(true),
 				Blocked = nav.blocked,
