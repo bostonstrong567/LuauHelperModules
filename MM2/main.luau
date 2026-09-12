@@ -1895,7 +1895,9 @@ local function travel(run, points, hum)
 			-- you stroll past people. Ask the real questions instead.
 			if run.retarget then
 				local r = myRoot()
-				local off = r and legFrom and (r.Position - legFrom).Magnitude > 2
+				-- no start position recorded means we cannot tell if we moved, so let the
+				-- retarget through rather than trapping the leg forever
+				local off = (not legFrom) or (r ~= nil and (r.Position - legFrom).Magnitude > 2)
 				if off or run.urgent then return "retarget" end
 			end
 			if not run.valid(run.target) then return "arrived" end
@@ -2857,11 +2859,11 @@ function danger.fleeLegs(root, threat)
 			return score
 		end,
 	})
-	-- same cap as roaming: eight path computations in a row is a visible freeze
+	-- try every escape, not just the first two: giving up early is how we got cornered
 	local tried = 0
 	for _, entry in best do
 		tried += 1
-		if tried > 2 then break end
+		if tried > 8 then break end
 		local at = entry.at + Vector3.new(0, 2, 0)
 		local legs = legsTo(here, at)
 		if legs and (entry.score < 0 or danger.routeSafe(legs, here, threat)) then
@@ -3007,13 +3009,13 @@ function danger.roamLegs(root, threatRoot)
 	end
 	local tries = shortlist(true)
 	if #tries == 0 then tries = shortlist(false) end
-	-- One legsTo can cost two path computations (~60ms). Eight of them in a row
-	-- measured 800ms with the character standing still. Try the best couple and
-	-- let the next tick carry on; roamDud already spaces the retries.
+	-- Ask the lattice router first (that is where the speed came from) and try
+	-- every candidate. Stopping at two meant a cramped corner, where the nearest
+	-- goals are the unreachable ones, produced no route and the bot just stood.
 	local tried = 0
 	for _, entry in tries do
 		tried += 1
-		if tried > 2 then break end
+		if tried > 8 then break end
 		local at = entry.at
 		local seen = threatRoot and (at - threatRoot.Position).Magnitude < 90
 			and not Workspace:Raycast(threatRoot.Position, at + Vector3.new(0, 1, 0) - threatRoot.Position, eyes)
@@ -3244,7 +3246,9 @@ function danger.brain()
 		if not legs and (danger.roamDud or 0) < now then
 			mode = "roam"
 			legs, goal = danger.roamLegs(root, threat or danger.shadow())
-			if not legs then danger.roamDud = now + 0.75 end
+			-- planning costs about 25ms now, so there is no reason to sit out three
+			-- quarters of a second after one miss
+			if not legs then danger.roamDud = now + 0.1 end
 			if legs and danger.throughTrap(legs) then
 				danger.badGoals[danger.goalKey(goal)] = now + 12
 				legs = nil
@@ -4007,7 +4011,15 @@ esp.tint = {
 	bodyEdge = Color3.fromRGB(255, 255, 255),
 }
 
-esp.notBody = {}
+-- Parts that live in a character but are not the body: tool handles, hats,
+-- gear meshes. Without this every one of them got a role highlight, which is
+-- why props and weapons showed up tinted.
+esp.notBody = {
+	Handle = true,
+	HandleTouched = true,
+	Hitbox = true,
+	HumanoidRootPart = true,
+}
 
 function esp.dropLimbs(set)
 	for _, hl in pairs(set.parts) do hl:Destroy() end
@@ -4106,7 +4118,9 @@ local function refreshRoleEsp()
 			local colour = ROLE_COLOURS[role] or Color3.new(1, 1, 1)
 			local fill = dead and 0.85 or 0.55
 			for _, limb in char:GetChildren() do
-				if limb:IsA("BasePart") and not esp.notBody[limb.Name] then
+				local wearable = limb:FindFirstAncestorWhichIsA("Tool")
+					or limb:FindFirstAncestorWhichIsA("Accessory")
+				if limb:IsA("BasePart") and not esp.notBody[limb.Name] and not wearable then
 					local hl = set.parts[limb]
 					if not hl or hl.Parent ~= limb then
 						hl = Instance.new("Highlight")
@@ -4123,7 +4137,10 @@ local function refreshRoleEsp()
 				end
 			end
 			for limb, hl in pairs(set.parts) do
-				if limb.Parent ~= char then
+				-- also drop it if the part stopped being body: unequipping a tool used to
+				-- carry its red highlight away with it.
+				if limb.Parent ~= char or esp.notBody[limb.Name]
+					or limb:FindFirstAncestorWhichIsA("Tool") or limb:FindFirstAncestorWhichIsA("Accessory") then
 					hl:Destroy()
 					set.parts[limb] = nil
 				end
