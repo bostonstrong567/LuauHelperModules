@@ -3313,6 +3313,13 @@ function danger.ahead(threat)
 	return heading and threat.Position + heading * speed * 1.5 or threat.Position
 end
 
+function danger.pace(threat)
+	-- how fast he is actually moving, floored at a stock walk
+	if not threat then return 16 end
+	local v = threat.AssemblyLinearVelocity
+	return math.max(16, Vector3.new(v.X, 0, v.Z).Magnitude)
+end
+
 function danger.routeSafe(legs, from, threat, first)
 	local prev, run = from, 0
 	for i = first or 1, #legs do
@@ -3320,7 +3327,15 @@ function danger.routeSafe(legs, from, threat, first)
 		run += (p - prev).Magnitude
 		prev = p
 		local his = danger.gap(p, threat)
-		if his < 26 or his / 18 < run / math.max(state.coinSpeed or 22, 16) + 0.5 then return false end
+		-- too close to pass: derived from his knife reach, not a flat 26.
+		-- (nav is declared below this function, so it cannot be read here.)
+		if his < KNIFE_REACH * 1.6 then return false end
+		-- can he beat us to this waypoint? both sides as time, at speeds we can read.
+		-- Comparing his distance against our cumulative path length (over a made-up
+		-- speed of 18) failed on any long route even with him nowhere near.
+		local mine = run / math.max(state.coinSpeed or 22, 16)
+		local theirs = his / danger.pace(threat)
+		if theirs < mine + 0.5 then return false end
 	end
 	return true
 end
@@ -7362,6 +7377,7 @@ S.timerStatus = statsSec:Status({ Text = "Round timer", Default = "intermission"
 S.aliveStatus = statsSec:Status({ Text = "Alive", Default = "waiting for round", Icon = "heart" })
 S.coinStatus = statsSec:Status({ Text = "Coins left", Default = "0", Icon = "circle-dollar-sign" })
 S.mapStatus = statsSec:Status({ Text = "Current map", Default = "none", Icon = "map-pin" })
+S.brainStatus = statsSec:Status({ Text = "Brain", Default = "idle", Icon = "brain" })
 
 statsSec:Separator()
 statsSec:Title({ Text = "THIS SESSION", Icon = "activity" })
@@ -7788,6 +7804,9 @@ local function refreshRoundInfo()
 
 	local able, why = canAct()
 	S.readyStatus:Set(able and "yes" or why)
+	-- danger.log() records every decision; show the most recent one
+	local lastNote = danger.brainLog and danger.brainLog[#danger.brainLog]
+	S.brainStatus:Set(lastNote and (lastNote:gsub("^[%d%.]+ ", "")) or "idle")
 
 	local secs = roundTimer()
 	if type(secs) == "number" and secs >= 0 then
