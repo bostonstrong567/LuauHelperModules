@@ -6340,6 +6340,9 @@ win:Track(RunService.Stepped:Connect(function()
 end))
 
 win:Track(RunService.Heartbeat:Connect(function()
+	-- A destroyed hub kept ticking: three instances were live at once, each with
+	-- its own nav and danger tables, and whichever answered first won.
+	if gone then return end
 	local now = os.clock()
 	if state.speed ~= 16 or state.jump ~= 50 or state.gravity ~= 196 or state.fly then plr.playerTick() end
 
@@ -6471,6 +6474,7 @@ end))
 
 win:OnDestroy(function()
 	gone = true
+	nav.ready, nav.world, nav.map = false, nil, nil
 	state.speed = 16
 	stopCoinRun()
 	finishRun()
