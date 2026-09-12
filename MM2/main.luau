@@ -1030,7 +1030,7 @@ local function sniperTick(now)
 		elseif not sniper.busy then
 			sniper.busy = true
 			task.spawn(function()
-				pcall(function()
+				local okShot, shotErr = pcall(function()
 				local r = myRoot()
 				if r and settleAt(r.CFrame) then
 					local o = gunOrigin()
@@ -1038,6 +1038,7 @@ local function sniperTick(now)
 					if aim then fireShot(shoot, o.WorldCFrame, aim, target.player.Name) end
 				end
 				end)
+				if not okShot then say("shot error: " .. tostring(shotErr), "triangle-alert", "danger") end
 				task.delay(0.15, releaseHold)
 				sheathe()
 				sniper.busy = false
@@ -1052,7 +1053,7 @@ local function sniperTick(now)
 	if now - sniper.blockedSince > 0.15 and not sniper.busy then
 		sniper.busy = true
 		task.spawn(function()
-			pcall(function()
+			local okShot, shotErr = pcall(function()
 			if legitOn("Shooting as sheriff") then
 				pcall(sniper.duel, target.player, 20)
 			else
@@ -1078,6 +1079,7 @@ local function sniperTick(now)
 				end
 			end
 			end)
+			if not okShot then say("shot error: " .. tostring(shotErr), "triangle-alert", "danger") end
 			sniper.busy = false
 		end)
 	end
@@ -2849,10 +2851,16 @@ function danger.fleeLegs(root, threat)
 			if run < 10 then return nil end
 			local his = danger.gap(p, threat)
 			local score = math.min(his, 120) + math.min(run, 80) * 0.8
-			-- getting out of sight is worth as much as getting far away
-			if danger.exposed(p, threat) then score -= 70 end
+			-- Being seen is what gets you killed, so it has to outweigh distance:
+			-- the reward above tops out at 120, and a spot he can watch you sit in
+			-- is worth less than a nearer one he cannot. Scaled to how far he can
+			-- actually hurt us from rather than a flat guess.
+			if danger.exposed(p, threat) then score -= math.clamp(danger.reach(), 120, 150) end
 			if his < math.max(mine, danger.safe) then score -= 60 end
-			if his / 18 < run / math.max(state.coinSpeed or 22, 16) + 0.5 then score -= 80 end
+			-- can he reach this spot before we do? his real pace, not a made-up 18
+			if his / danger.pace(threat) < run / math.max(state.coinSpeed or 22, 16) + 0.5 then
+				score -= 80
+			end
 			local hisWay = danger.flat(p, threat.Position)
 			if heading and hisWay.Magnitude > 1 then score -= 40 * math.max(0, heading:Dot(hisWay.Unit)) end
 			danger.keepBest(best, state.Lattice and state.Floor or p, score)
@@ -2998,8 +3006,9 @@ function danger.roamLegs(root, threatRoot)
 					if his < math.min(math.max(mine - 10, danger.near), danger.safe) then return nil end
 					if ahead and (p - ahead).Magnitude < 40 then return nil end
 					score += math.min(his, 150) * 0.6
-					-- do not stand in his eyeline while wandering
-					if danger.exposed(p, threatRoot) then score -= 55 end
+					-- do not wander through his eyeline: the distance reward above reaches
+					-- 90, so this has to be comparable or it never changes the pick
+					if danger.exposed(p, threatRoot) then score -= 100 end
 				end
 				danger.keepBest(best, state.Lattice and state.Floor or p, score)
 				return score
