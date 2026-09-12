@@ -1464,7 +1464,37 @@ function danger.pace(threat)
 	return math.max(16, Vector3.new(v.X, 0, v.Z).Magnitude)
 end
 
+function danger.hunting(threat)
+	if not threat or not threat.Parent then
+		danger.huntAt = nil
+		return false
+	end
+	local me = myRoot()
+	if not me then return false end
+	local now = os.clock()
+	local gap = danger.gap(me.Position, threat)
+	-- pointed at us: same convention the sniper uses
+	local toward = danger.flat(me.Position, threat.Position)
+	local heading = danger.heading(threat)
+	local facing = heading ~= nil and toward.Magnitude > 0.01
+		and heading:Dot(toward.Unit) > 0.5
+	-- and actually getting closer, which facing alone does not prove
+	local was, wasAt = danger.huntGap, danger.huntGapAt
+	danger.huntGap, danger.huntGapAt = gap, now
+	local shrinking = was ~= nil and wasAt ~= nil and now - wasAt < 3 and gap < was - 1
+	if (facing and shrinking) or danger.dangerous(threat) then
+		danger.huntAt = now
+		return true
+	end
+	-- slow to release: he can turn round in half a second, so stay wary a while
+	return danger.huntAt ~= nil and now - danger.huntAt < 4
+end
+
 function danger.routeSafe(legs, from, threat, first)
+	-- ask once: hunting() records the gap to compare against next time, so
+	-- calling it per waypoint would overwrite its own history and never see
+	-- him closing.
+	local chased = danger.hunting(threat)
 	local prev, run = from, 0
 	for i = first or 1, #legs do
 		local p = legs[i].Position
@@ -1479,7 +1509,9 @@ function danger.routeSafe(legs, from, threat, first)
 		-- speed of 18) failed on any long route even with him nowhere near.
 		local mine = run / math.max(state.coinSpeed or 22, 16)
 		local theirs = his / danger.pace(threat)
-		if theirs < mine + 0.5 then return false end
+		-- give ourselves less margin when he is not actually coming for us
+		local margin = chased and 0.5 or 0.15
+		if theirs < mine + margin then return false end
 	end
 	return true
 end
@@ -1508,7 +1540,8 @@ local function nearestCoin(from, now)
 	local ranked = {}
 	local threat = danger.root()
 	local parts = coinParts()
-	local minGap = danger.safe
+	-- he is somewhere else and not coming: stop treating the whole map as his
+	local minGap = danger.hunting(threat) and danger.safe or math.max(KNIFE_REACH * 2, danger.near / 2)
 	local ourGap = threat and danger.gap(from, threat) or math.huge
 	local toThreat = threat and danger.flat(threat.Position, from) or Vector3.zero
 	for _, part in parts do
@@ -3236,7 +3269,7 @@ function danger.brain()
 			if legs then mode = "open" end
 		end
 		if not legs then
-			note("no legs gap=" .. tostring(math.floor(gap ~= math.huge and gap or -1)))
+			note("no legs gap=" .. tostring(math.floor(gap ~= math.huge and gap or -1)) .. (threat and (danger.hunting(threat) and " hunted" or " he is elsewhere") or " no threat"))
 			danger.push(run, root, danger.openDir(root, threat) or run.moveDir or root.CFrame.LookVector)
 			RunService.Heartbeat:Wait()
 			continue
